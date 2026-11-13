@@ -162,7 +162,7 @@ panel.AnchorPoint=Vector2.new(0,.5)
 panel.Position=UDim2.new(0,24,.5,0)
 outline(panel)
 local scale=new("UIScale",{},panel)
-local title=label(panel,"Combat UI | PRISON-2",9,4,410,19,12)
+local title=label(panel,"Combat UI | PRISON-4",9,4,410,19,12)
 rect(panel,7,27,546,2,"Accent")
 local function button(parent,text,x,y,w,h,fn)
 	local b=theme(new("TextButton",{Text=text,Position=UDim2.fromOffset(x,y),
@@ -424,8 +424,8 @@ number(themeGroup,"Menu transparency",9,214,239,function()return UI.MenuAlpha en
 local rageConfig=new("Folder",{Name="RageSettings"},gui)
 local rageDefaults={Enabled=false,Aimbot=true,SilentAim=false,AutoShoot=false,AutoWall=false,
  Wallbang=false,Prediction=false,PredictionTime=0,NoRecoil=true,NoSpread=false,HitChance=0,
- FOV=200,Selection="Manual",TargetKey="T",SelectedUserId=0,Hitbox="Head",VisibilityCheck=true,AutoSwitch=true,
- RapidFire=false,Aim360=false,TeamCheck=true,ClosestPart=false,IgnoreProtected=false,
+ FOV=200,Selection="Manual",TargetKey="Sin asignar",SelectedUserId=0,Hitbox="Head",VisibilityCheck=true,AutoSwitch=true,
+ RapidFire=false,Aim360=false,TeamCheck=true,TeleportTarget=true,Visualize=true,ClosestPart=false,IgnoreProtected=false,
  LimitDistance=false,MaxDistance=800,ReactionTime=0,ForgetTime=1,FullAuto=false,FireRatePercent=100,
  NotifyHit=true,NotifyDuration=2,NotifyText="Hit {NAME} for {DMG} in {PART} ({WEAPON})"}
 for key,value in pairs(rageDefaults) do rageConfig:SetAttribute(key,value) end
@@ -456,11 +456,10 @@ number(rageRight,"Prediction time (s)",9,210,239,function()return rageConfig:Get
  function(v)rageConfig:SetAttribute("PredictionTime",v)end,0,.25)
 local targetBinding=false
 local targetControls=group(pages["Rage Bot"],"OBJETIVO",4,13,530,200)
+local rageGhost=nil
 local observing=false
 local observedCamera,previousSubject
-label(targetControls,"Target Selection: solo la tecla",9,16,260,25)
-label(targetControls,"Asignar tecla",274,16,130,25)
-local selectKeyButton=button(targetControls,"[T]",408,16,109,25,function()
+local selectKeyButton=button(targetControls,"Target Selection [Sin asignar] - cambiar tecla",9,16,508,25,function()
  targetBinding=not targetBinding;binding=false;menuBinding=false
 end)
 local selectedLabel=label(targetControls,"Objetivo: ninguno",9,51,508,20,11,"Muted")
@@ -495,8 +494,10 @@ local function selectRageTarget(p)
  if not p or p==me or p.Parent~=P then return end
  rageConfig:SetAttribute("SelectedUserId",p.UserId)
  rageConfig:SetAttribute("Selection","Manual")
+ rageConfig:SetAttribute("RapidFire",true);rageConfig:SetAttribute("AutoShoot",true);rageConfig:SetAttribute("SilentAim",true)
+ rageConfig:SetAttribute("Enabled",true)
  refresh()
- note("Objetivo: "..p.Name..". Seleccionado sin cambiar la activacion.")
+ note("Rage ON: "..p.Name..". Pulsa tu tecla otra vez para apagar.")
 end
 label(targetControls,"Mouse sobre jugador + tecla: selecciona sin hacer clic.",9,119,508,22,11,"Muted")
 label(targetControls,"Prison Life: revisa el estado en Arma / impactos.",9,152,508,27,11,"Muted")
@@ -533,15 +534,119 @@ on(R.Heartbeat,function()
  local p=selectedPlayer()
  if p and not body(p.Character) then rageConfig:SetAttribute("SelectedUserId",0);p=nil end
  selectedLabel.Text="Objetivo: "..(p and p.Name or "ninguno")
- selectKeyButton.Text=targetBinding and "[PRESS KEY]" or "["..rageConfig:GetAttribute("TargetKey").."]"
+ selectKeyButton.Text=targetBinding and "Pulsa la nueva tecla... (Esc cancela)" or "Target Selection ["..rageConfig:GetAttribute("TargetKey").."] - cambiar tecla"
  observeButton.Text=observing and "Dejar de observar" or "Observar objetivo"
  if observing then
   local h=p and body(p.Character)
+  rageConfig:SetAttribute("Observing",true)
   if not h or workspace.CurrentCamera~=observedCamera then endObserve()
   else observedCamera.CameraSubject=h end
  end
 end)
 on(gui.Destroying,endObserve)
+check(rageRight,"TP al objetivo",8,266,240,function()return rageConfig:GetAttribute("TeleportTarget")end,function(v)rageConfig:SetAttribute("TeleportTarget",v)end)
+check(rageRight,"Visualize: copia controlable",8,294,240,function()return rageConfig:GetAttribute("Visualize")end,function(v)rageConfig:SetAttribute("Visualize",v)end)
+label(rageRight,"Copia local: WASD + Espacio.",9,334,239,30,11,"Muted")
+-- Local controllable proxy. The server still sees the original character at the target.
+do
+ local sourceCharacter=nil
+ local savedSubject,savedType,proxyCamera
+ local proxyHumanoid=nil
+ local motors={}
+ local nextTeleport=0
+ local function clearProxy()
+  if not rageGhost then return end
+  if observing then endObserve() end
+  if proxyCamera and proxyCamera==workspace.CurrentCamera then
+   local own=me.Character and me.Character:FindFirstChildOfClass("Humanoid")
+   proxyCamera.CameraSubject=(savedSubject and savedSubject.Parent and savedSubject) or own
+   if savedType then proxyCamera.CameraType=savedType end
+  end
+  rageGhost:Destroy();rageGhost=nil;sourceCharacter=nil;proxyHumanoid=nil
+  table.clear(motors);syncMenuControls(true)
+ end
+ local function buildProxy(character)
+  clearProxy()
+  local old=character.Archivable;character.Archivable=true
+  local ok,clone=pcall(function()return character:Clone()end)
+  character.Archivable=old
+  if not ok or not clone then note("No se pudo crear la copia local.");return end
+  for _,item in ipairs(clone:GetDescendants()) do
+   if item:IsA("LuaSourceContainer") or item:IsA("Tool") or item:IsA("Sound") or item:IsA("ParticleEmitter") or item:IsA("Trail") then item:Destroy() end
+  end
+  for _,item in ipairs(clone:GetDescendants()) do
+   if item:IsA("BasePart") then
+    item.Anchored=false;item.CanTouch=false;item.CanQuery=false
+    item.AssemblyLinearVelocity=Vector3.zero;item.AssemblyAngularVelocity=Vector3.zero
+    item.Transparency=math.max(item.Transparency,.2)
+   elseif item:IsA("Motor6D") and (item.Name:find("Hip") or item.Name:find("Shoulder")) then
+    table.insert(motors,{Part=item,Base=item.C0,Sign=item.Name:find("Left") and 1 or -1})
+   end
+  end
+  proxyHumanoid=clone:FindFirstChildOfClass("Humanoid")
+  if not proxyHumanoid then clone:Destroy();return end
+  proxyHumanoid.DisplayDistanceType=Enum.HumanoidDisplayDistanceType.None
+  proxyHumanoid.PlatformStand=false;proxyHumanoid.Sit=false;proxyHumanoid.AutoRotate=true
+  proxyHumanoid.WalkSpeed=16
+  clone.Name="CombatLocalProxy";clone.Parent=workspace
+  rageGhost=clone;sourceCharacter=character
+  proxyCamera=workspace.CurrentCamera
+  if proxyCamera then
+   savedSubject=proxyCamera.CameraSubject;savedType=proxyCamera.CameraType
+   if not observing then proxyCamera.CameraType=Enum.CameraType.Custom;proxyCamera.CameraSubject=proxyHumanoid end
+  end
+  syncMenuControls(true)
+  note("Copia local: WASD y Espacio. Los demas ven tu personaje real junto al objetivo.")
+ end
+ on(R.Heartbeat,function()
+  local p=selectedPlayer()
+  local own,root=body(me.Character)
+  local other,otherRoot
+  if p then other,otherRoot=body(p.Character) end
+  if not alive or not rageConfig:GetAttribute("Enabled") or not own or not other then clearProxy();nextTeleport=0;return end
+  -- Create the proxy BEFORE teleporting, preserving the user's starting location.
+  if rageConfig:GetAttribute("Visualize") then
+   if sourceCharacter~=me.Character or not rageGhost or not rageGhost.Parent then buildProxy(me.Character) end
+  else clearProxy() end
+  if rageGhost then own:Move(Vector3.zero) end
+  if rageConfig:GetAttribute("TeleportTarget") and os.clock()>=nextTeleport then
+   nextTeleport=os.clock()+.2
+   if (root.Position-otherRoot.Position).Magnitude>7 then
+    local position=otherRoot.Position-otherRoot.CFrame.LookVector*4
+    root.CFrame=CFrame.lookAt(position,Vector3.new(otherRoot.Position.X,position.Y,otherRoot.Position.Z))
+    root.AssemblyLinearVelocity=Vector3.zero;root.AssemblyAngularVelocity=Vector3.zero
+   end
+  end
+ end)
+ on(R.RenderStepped,function()
+  if not rageGhost or not proxyHumanoid then return end
+  local camera=workspace.CurrentCamera
+  if not camera then return end
+  local movement=Vector3.zero
+  if not observing and not GuiService.MenuIsOpen and not U:GetFocusedTextBox() and not (UI.DisableMovement and panel.Visible) then
+   local x=(U:IsKeyDown(Enum.KeyCode.D) and 1 or 0)-(U:IsKeyDown(Enum.KeyCode.A) and 1 or 0)
+   local z=(U:IsKeyDown(Enum.KeyCode.W) and 1 or 0)-(U:IsKeyDown(Enum.KeyCode.S) and 1 or 0)
+   local look=Vector3.new(camera.CFrame.LookVector.X,0,camera.CFrame.LookVector.Z)
+   local right=Vector3.new(camera.CFrame.RightVector.X,0,camera.CFrame.RightVector.Z)
+   if look.Magnitude>.001 then look=look.Unit else look=Vector3.new(0,0,-1) end
+   if right.Magnitude>.001 then right=right.Unit else right=Vector3.new(1,0,0) end
+   movement=right*x+look*z
+   if movement.Magnitude>1 then movement=movement.Unit end
+   if U:IsKeyDown(Enum.KeyCode.Space) and proxyHumanoid.FloorMaterial~=Enum.Material.Air then proxyHumanoid.Jump=true end
+  end
+  proxyHumanoid:Move(movement,false)
+  local swing=movement.Magnitude>.05 and math.sin(os.clock()*10)*.5 or 0
+  for _,motor in ipairs(motors) do
+   if motor.Part.Parent then motor.Part.C0=motor.Base*CFrame.Angles(swing*motor.Sign,0,0) end
+  end
+  if not observing then camera.CameraType=Enum.CameraType.Custom;camera.CameraSubject=proxyHumanoid end
+ end)
+ on(rageConfig.AttributeChanged,function(key)
+  if (key=="Enabled" and not rageConfig:GetAttribute("Enabled")) or (key=="Visualize" and not rageConfig:GetAttribute("Visualize")) then clearProxy() end
+ end)
+ on(gui.Destroying,clearProxy)
+end
+
 local advanced=group(pages["Rage Bot"],"Targeting avanzado",4,940,258,350)
 local weaponOptions=group(pages["Rage Bot"],"Arma / impactos",276,940,258,350)
 for i,entry in ipairs({{"ClosestPart","Closest part"},{"IgnoreProtected","Ignore protected"},{"LimitDistance","Limit distance"}}) do
@@ -696,7 +801,7 @@ activeLabel.TextYAlignment=Enum.TextYAlignment.Top
 activeLabel.TextTruncate=Enum.TextTruncate.None
 local watermark=rect(gui,8,8,365,23,"Background")
 outline(watermark);rect(watermark,0,0,365,1,"Accent")
-local watermarkText=label(watermark,"Combat UI | PRISON-2",6,3,353,18,11)
+local watermarkText=label(watermark,"Combat UI | PRISON-4",6,3,353,18,11)
 
 local function activeRows()
 	local rows={}
@@ -741,7 +846,7 @@ refresh=function()
 	refreshHUD()
 end
 syncMenuControls=function(force)
-	local desired=alive and (driving or (UI.DisableMovement and panel.Visible))
+	local desired=alive and (rageGhost~=nil or driving or (UI.DisableMovement and panel.Visible))
 	if controls and (force or desired~=controlsHeld) then
 		local ok=pcall(function()if desired then controls:Disable() else controls:Enable() end end)
 		if ok then controlsHeld=desired end
@@ -970,7 +1075,7 @@ R:BindToRenderStep("SimpleCombatHUD",Enum.RenderPriority.Last.Value,function(dt)
 	hudClock=hudClock+dt;fpsClock=fpsClock+dt;frames=frames+1
 	if hudClock>=.1 then refreshHUD();hudClock=0 end
 	if fpsClock>=.5 then
-		watermarkText.Text=string.format("Combat UI | PRISON-2 | %s | %d fps",me.Name,math.round(frames/fpsClock))
+		watermarkText.Text=string.format("Combat UI | PRISON-4 | %s | %d fps",me.Name,math.round(frames/fpsClock))
 		fpsClock,frames=0,0
 	end
 end)
@@ -1340,6 +1445,10 @@ on(U.InputBegan,function(input,processed)
     end
     if input.UserInputType==Enum.UserInputType.Keyboard and input.KeyCode.Name==rageConfig:GetAttribute("TargetKey")
         and not binding and not menuBinding and not GuiService.MenuIsOpen then
+        if rageConfig:GetAttribute("Enabled") then
+            rageConfig:SetAttribute("Enabled",false)
+            endObserve();note("Rage OFF. Tu tecla vuelve a seleccionar y activar.");refresh();return
+        end
         local hit=me:GetMouse().Target
         local chosen=nil
         while hit and hit~=workspace do
@@ -1585,7 +1694,7 @@ do
  local running=true
  local randomChoice,randomOwner
  local function active()
-  return alive and running and rageConfig:GetAttribute("Enabled") and not observing
+  return alive and running and rageConfig:GetAttribute("Enabled") and (not observing or rageGhost~=nil)
    and not GuiService.MenuIsOpen and not U:GetFocusedTextBox()
  end
  local function restore(tool,record)
@@ -1653,8 +1762,12 @@ do
  end
  local function clear(p,limb,camera)
   local params=RaycastParams.new();params.FilterType=Enum.RaycastFilterType.Exclude
-  params.FilterDescendantsInstances={me.Character,camera}
-  local hit=workspace:Raycast(camera.CFrame.Position,limb.Position-camera.CFrame.Position,params)
+  local ignored={me.Character,camera}
+  if rageGhost then table.insert(ignored,rageGhost) end
+  params.FilterDescendantsInstances=ignored
+  local head=part(me.Character,"Head")
+  local origin=rageGhost and head and head.Position or camera.CFrame.Position
+  local hit=workspace:Raycast(origin,limb.Position-origin,params)
   return not hit or hit.Instance:IsDescendantOf(p.Character)
  end
  local function candidate(p,camera,manual)
@@ -1755,7 +1868,7 @@ do
   if not limb or os.clock()-acquiredAt<(rageConfig:GetAttribute("ReactionTime") or 0) then return end
   local point=limb.Position
   if rageConfig:GetAttribute("Prediction") then point+=limb.AssemblyLinearVelocity*(rageConfig:GetAttribute("PredictionTime") or 0) end
-  if rageConfig:GetAttribute("Aimbot") and not rageConfig:GetAttribute("SilentAim") then
+  if not observing and not rageGhost and rageConfig:GetAttribute("Aimbot") and not rageConfig:GetAttribute("SilentAim") then
    if (point-camera.CFrame.Position).Magnitude>.001 then camera.CFrame=CFrame.lookAt(camera.CFrame.Position,point) end
   end
   if not rageConfig:GetAttribute("AutoShoot") or os.clock()<nextShot then return end
