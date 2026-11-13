@@ -1,4 +1,4 @@
--- VERSION 3.4: body-based player selection, then independent Head/Torso aiming.
+-- VERSION 3.5: body-based player selection, then independent Head/Torso aiming.
 -- COMBAT UI: siempre selecciona al jugador mas cercano a la mira dentro del FOV.
 -- Target lock ON = apuntado directo; OFF = usa Smoothness.
 -- Sticky OFF: holds the current valid target through jitter; deliberate mouse movement permits retargeting.
@@ -69,7 +69,10 @@ local function visible(origin, model)
 	if not root then return false end
 	local params = RaycastParams.new()
 	params.FilterType = Enum.RaycastFilterType.Exclude
-	params.FilterDescendantsInstances = me.Character and {me.Character} or {}
+	local ignored={}
+	if me.Character then table.insert(ignored,me.Character) end
+	if workspace.CurrentCamera then table.insert(ignored,workspace.CurrentCamera) end
+	params.FilterDescendantsInstances=ignored
 	local hit = workspace:Raycast(origin,root.Position-origin,params)
 	return not hit or hit.Instance:IsDescendantOf(model)
 end
@@ -119,7 +122,7 @@ local badge=smallButton("+",16,16,34,34)
 badge.Active=false
 badge.AutoButtonColor=false
 txt(panel,"COMBAT",60,12,140,27,22,ink,Enum.Font.GothamBlack)
-txt(panel,"CONTROL PANEL v3.4",61,39,150,12,9,gray)
+txt(panel,"CONTROL PANEL v3.5",61,39,150,12,9,gray)
 local activeCount=smallButton("KEY: Q",254,20,90,26)
 activeCount.Active=true
 activeCount.AutoButtonColor=true
@@ -133,7 +136,7 @@ for i=0,55 do
 	new("Frame",{Position=UDim2.fromOffset(19+i*7,63+(i%2)*3),
 		Size=UDim2.fromOffset(7,3),BackgroundColor3=ink,BorderSizePixel=0},panel)
 end
-txt(panel,"AIM & AUTOMATION",17,77,240,13,9,gray)
+local sectionInfo=txt(panel,"AIM & AUTOMATION",17,77,310,13,9,gray)
 local buttons,cards={},{}
 local function card(key,title,subtitle,x,y)
 	local shadow=new("Frame",{Position=UDim2.fromOffset(x+2,y+3),
@@ -304,6 +307,22 @@ refresh=function()
 	end
 end
 
+local function updateESPCounts()
+	local eligible,teammates,unready=0,0,0
+	for _,p in ipairs(P:GetPlayers()) do
+		if p~=me then
+			if not body(p.Character) then unready=unready+1
+			elseif S.TeamCheck and not me.Neutral and not p.Neutral and me.Team and p.Team==me.Team then
+				teammates=teammates+1
+			else eligible=eligible+1 end
+		end
+	end
+	if espPage.Visible then
+		sectionInfo.Text="ESP: "..eligible.." / TEAM EXCLUDED: "..teammates.." / NOT READY: "..unready
+	else
+		sectionInfo.Text=S.TeamCheck and ("TEAM CHECK ON / "..teammates.." EXCLUDED") or "AIM & AUTOMATION / ALL TEAMS"
+	end
+end
 local espWorld=new("Folder",{Name="CombatLocalESP"},workspace)
 local espRecords={}
 local bonePairs={
@@ -355,6 +374,7 @@ end
 R:BindToRenderStep("SimpleCombatESP",Enum.RenderPriority.Camera.Value+2,function()
 	local camera=workspace.CurrentCamera
 	if not camera or not alive then return end
+	updateESPCounts()
 	for _,record in pairs(espRecords) do
 		record.Container.Visible=false
 		record.Highlight.Enabled=false
@@ -735,7 +755,15 @@ local function pickClosest(camera,center,intentSwitch)
 end
 
 
--- Aimbot: nueva seleccion cada frame, sin conservar el objetivo anterior.
+local function aimAlpha(smooth,instant,manual,dt)
+	local seconds=smooth/100*.45
+	local alpha=(instant or seconds==0) and 1 or 1-math.exp(-dt/seconds)
+	-- Keep assisting during mouse movement, while allowing intentional steering.
+	if manual then alpha=math.min(alpha,1-math.exp(-dt*4)) end
+	return alpha
+end
+
+-- Aimbot: immediate acquisition with mouse-intent retargeting.
 R:BindToRenderStep("SimpleCombatAim",Enum.RenderPriority.Camera.Value+1,function(dt)
 	local camera=workspace.CurrentCamera
 	if not alive or not camera then return end
@@ -758,13 +786,13 @@ R:BindToRenderStep("SimpleCombatAim",Enum.RenderPriority.Camera.Value+1,function
 		target,selected=pickClosest(camera,center,intentSwitch)
 	else stickyTarget=nil; mouseIntent=Vector2.zero
 	end
-	 if selected and not manualMove and (selected.Position-camera.CFrame.Position).Magnitude>.01 then
+	 if selected and (selected.Position-camera.CFrame.Position).Magnitude>.01 then
 		local ray=camera:ViewportPointToRay(center.X,center.Y)
 		local localRay=camera.CFrame:VectorToObjectSpace(ray.Direction)
 		local correction=CFrame.lookAt(Vector3.zero,localRay):Inverse()
 		local goal=CFrame.lookAt(camera.CFrame.Position,selected.Position)*correction
-		local seconds=S.Smooth/100*.45
-		local alpha=(S.Lock or seconds==0) and 1 or 1-math.exp(-dt/seconds)
+		local alpha=aimAlpha(S.Smooth,S.Lock,manualMove,dt)
+
 		camera.CFrame=camera.CFrame:Lerp(goal,alpha)
 	end
 	stroke.Color=target and Color3.fromRGB(250,250,248) or blue
