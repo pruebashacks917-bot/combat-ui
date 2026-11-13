@@ -162,7 +162,7 @@ panel.AnchorPoint=Vector2.new(0,.5)
 panel.Position=UDim2.new(0,24,.5,0)
 outline(panel)
 local scale=new("UIScale",{},panel)
-local title=label(panel,"Combat UI | TARGET-2",9,4,410,19,12)
+local title=label(panel,"Combat UI | CONNECTED-1",9,4,410,19,12)
 rect(panel,7,27,546,2,"Accent")
 local function button(parent,text,x,y,w,h,fn)
 	local b=theme(new("TextButton",{Text=text,Position=UDim2.fromOffset(x,y),
@@ -305,7 +305,7 @@ end
 for i,name in ipairs({"Aimbot","ESP","Rage Bot","Settings"}) do
 	local page=new("ScrollingFrame",{Name=name,Position=UDim2.fromOffset(9,62),
 		Size=UDim2.fromOffset(542,510),BackgroundTransparency=1,BorderSizePixel=0,
-		ScrollBarThickness=3,CanvasSize=UDim2.fromOffset(0,name=="Settings" and 824 or name=="Rage Bot" and 745 or 510),
+		ScrollBarThickness=3,CanvasSize=UDim2.fromOffset(0,name=="Settings" and 824 or name=="Rage Bot" and 1310 or 510),
 		ScrollingDirection=Enum.ScrollingDirection.Y,Visible=name==UI.Tab},panel)
 	theme(page,"ScrollBarImageColor3","Accent")
 	pages[name]=page
@@ -425,10 +425,12 @@ local rageConfig=new("Folder",{Name="RageSettings"},gui)
 local rageDefaults={Enabled=false,Aimbot=true,SilentAim=false,AutoShoot=false,AutoWall=false,
  Wallbang=false,Prediction=false,PredictionTime=0,NoRecoil=true,NoSpread=false,HitChance=0,
  FOV=200,Selection="Manual",TargetKey="T",SelectedUserId=0,Hitbox="Head",VisibilityCheck=true,AutoSwitch=true,
- RapidFire=false,Aim360=false,TeamCheck=true}
+ RapidFire=false,Aim360=false,TeamCheck=true,ClosestPart=false,IgnoreProtected=false,
+ LimitDistance=false,MaxDistance=800,ReactionTime=0,ForgetTime=1,FullAuto=false,FireRatePercent=100,
+ NotifyHit=true,NotifyDuration=2,NotifyText="Hit {NAME} for {DMG} in {PART} ({WEAPON})"}
 for key,value in pairs(rageDefaults) do rageConfig:SetAttribute(key,value) end
-local rageLeft=group(pages["Rage Bot"],"Private weapon",4,235,258,350)
-local rageRight=group(pages["Rage Bot"],"Targeting",276,235,258,475)
+local rageLeft=group(pages["Rage Bot"],"Private weapon",4,435,258,350)
+local rageRight=group(pages["Rage Bot"],"Targeting",276,435,258,475)
 local rageFlags={{"Enabled","Rage Bot enabled"},{"Aimbot","Aimbot"},{"SilentAim","Silent Aim"},
  {"AutoShoot","Auto Shoot"},{"AutoWall","Auto Wall"},{"Wallbang","Wallbang"},
  {"Prediction","Target Prediction"},{"NoRecoil","No Recoil (weapon has none)"},
@@ -494,13 +496,45 @@ end)
 button(targetControls,"Quitar objetivo",274,81,243,25,function()
  rageConfig:SetAttribute("SelectedUserId",0);endObserve()
 end)
-button(targetControls,"Activar Rage sobre este objetivo",9,116,508,25,function()
- if not selectedPlayer() then note("Selecciona un jugador primero.");return end
- rageConfig:SetAttribute("Selection","Manual");rageConfig:SetAttribute("Enabled",true)
+local function selectRageTarget(p)
+ if not p or p==me or p.Parent~=P then return end
+ rageConfig:SetAttribute("SelectedUserId",p.UserId)
+ rageConfig:SetAttribute("Selection","Manual")
+ rageConfig:SetAttribute("Enabled",true)
  S.Aim=false;heldAim=false;target=nil;stickyTarget=nil;stopBot();refresh()
- note("Las funciones habilitadas de Rage usan este objetivo.")
+ note("Objetivo: "..p.Name..". Rage activado con tus opciones actuales.")
+end
+label(targetControls,"Mouse sobre jugador + tecla: selecciona y activa Rage.",9,119,508,22,11,"Muted")
+label(targetControls,"Funciones del arma: requieren la integracion instalada.",9,152,508,27,11,"Muted")
+local serverGroup=group(pages["Rage Bot"],"JUGADORES DEL SERVIDOR",4,231,530,180)
+local serverList=new("ScrollingFrame",{Position=UDim2.fromOffset(8,14),Size=UDim2.fromOffset(514,156),
+ BackgroundTransparency=1,BorderSizePixel=0,ScrollBarThickness=4,CanvasSize=UDim2.fromOffset(0,0)},serverGroup)
+local listConnections={}
+local function rebuildServerList(exclude)
+ for _,connection in ipairs(listConnections) do connection:Disconnect() end
+ table.clear(listConnections)
+ serverList:ClearAllChildren()
+ local players=P:GetPlayers()
+ table.sort(players,function(a,b)return a.Name:lower()<b.Name:lower()end)
+ local index=0
+ for _,p in ipairs(players) do
+  if p~=me and p~=exclude then
+   local row=button(serverList,p.DisplayName.." (@"..p.Name..")",2,index*29,502,25)
+   row.TextXAlignment=Enum.TextXAlignment.Left
+   table.insert(listConnections,row.Activated:Connect(function()selectRageTarget(p)end))
+   index+=1
+  end
+ end
+ serverList.CanvasSize=UDim2.fromOffset(0,index*29)
+ if index==0 then label(serverList,"No hay otros jugadores.",4,0,490,25,12,"Muted") end
+end
+on(P.PlayerAdded,function()rebuildServerList()end)
+on(P.PlayerRemoving,function(p)
+ if rageConfig:GetAttribute("SelectedUserId")==p.UserId then rageConfig:SetAttribute("SelectedUserId",0);endObserve() end
+ rebuildServerList(p)
 end)
-label(targetControls,"Seleccionar no activa opciones apagadas. Arma integrada requerida.",9,158,508,27,11,"Muted")
+on(gui.Destroying,function()for _,connection in ipairs(listConnections) do connection:Disconnect() end end)
+rebuildServerList()
 on(R.Heartbeat,function()
  local p=selectedPlayer()
  if p and not body(p.Character) then rageConfig:SetAttribute("SelectedUserId",0);p=nil end
@@ -514,6 +548,44 @@ on(R.Heartbeat,function()
  end
 end)
 on(gui.Destroying,endObserve)
+local advanced=group(pages["Rage Bot"],"Targeting avanzado",4,940,258,350)
+local weaponOptions=group(pages["Rage Bot"],"Arma / impactos",276,940,258,350)
+for i,entry in ipairs({{"ClosestPart","Closest part"},{"IgnoreProtected","Ignore protected"},{"LimitDistance","Limit distance"}}) do
+ local key,titleText=entry[1],entry[2]
+ check(advanced,titleText,8,12+(i-1)*25,240,function()return rageConfig:GetAttribute(key)end,function(v)rageConfig:SetAttribute(key,v)end)
+end
+for i,entry in ipairs({{"MaxDistance","Max distance",1,800},{"ReactionTime","Reaction time (s)",0,2},{"ForgetTime","Forget time (s)",0,5}}) do
+ local key,titleText,minimum,maximum=entry[1],entry[2],entry[3],entry[4]
+ number(advanced,titleText,9,100+(i-1)*48,239,function()return rageConfig:GetAttribute(key)end,function(v)rageConfig:SetAttribute(key,v)end,minimum,maximum)
+end
+label(advanced,"Manual selection never switches",9,258,239,20,11,"Muted")
+label(advanced,"to an unselected player.",9,279,239,20,11,"Muted")
+check(weaponOptions,"Full auto",8,12,240,function()return rageConfig:GetAttribute("FullAuto")end,function(v)rageConfig:SetAttribute("FullAuto",v)end)
+number(weaponOptions,"Firerate (%)",9,44,239,function()return rageConfig:GetAttribute("FireRatePercent")end,function(v)rageConfig:SetAttribute("FireRatePercent",v)end,25,200)
+check(weaponOptions,"Notify confirmed hit",8,87,240,function()return rageConfig:GetAttribute("NotifyHit")end,function(v)rageConfig:SetAttribute("NotifyHit",v)end)
+number(weaponOptions,"Notify duration (s)",9,123,239,function()return rageConfig:GetAttribute("NotifyDuration")end,function(v)rageConfig:SetAttribute("NotifyDuration",v)end,1,10)
+input(weaponOptions,rageConfig:GetAttribute("NotifyText"),9,168,239,23,function(v)rageConfig:SetAttribute("NotifyText",v:sub(1,180))end)
+label(weaponOptions,"{NAME} {DMG} {PART} {WEAPON}",9,198,239,20,11,"Muted")
+local integrationStatus=label(weaponOptions,"Comprobando arma...",9,238,239,60,11,"Muted")
+integrationStatus.TextWrapped=true
+local RS=game:GetService("ReplicatedStorage")
+local hitConnected=false
+on(R.Heartbeat,function()
+ local tool=me.Character and me.Character:FindFirstChildOfClass("Tool")
+ local ready=RS:GetAttribute("CombatWeaponProtocol")==2 and tool and tool:GetAttribute("CombatWeaponClientReady")
+ integrationStatus.Text=ready and "Arma conectada. Modificadores: Studio / propietario privado." or "ARMA NO CONECTADA: los ajustes no controlan esta arma."
+ local event=RS:FindFirstChild("CombatConfirmedHit")
+ if not hitConnected and event and event:IsA("RemoteEvent") then
+  hitConnected=true
+  on(event.OnClientEvent,function(name,damage,partName,weapon)
+   if not rageConfig:GetAttribute("NotifyHit") then return end
+   local values={NAME=tostring(name),DMG=string.format("%.1f",tonumber(damage) or 0),PART=tostring(partName),WEAPON=tostring(weapon)}
+   local text=rageConfig:GetAttribute("NotifyText"):gsub("{(%w+)}",function(key)return values[key] or "{"..key.."}"end)
+   note(text);messageUntil=os.clock()+rageConfig:GetAttribute("NotifyDuration")
+  end)
+ end
+end)
+
 local configGroup=group(pages.Settings,"Configuration",276,13,258,230)
 label(configGroup,"Config name",9,12,239,17)
 local configName=input(configGroup,"default",9,33,239,20)
@@ -546,7 +618,7 @@ activeLabel.TextYAlignment=Enum.TextYAlignment.Top
 activeLabel.TextTruncate=Enum.TextTruncate.None
 local watermark=rect(gui,8,8,365,23,"Background")
 outline(watermark);rect(watermark,0,0,365,1,"Accent")
-local watermarkText=label(watermark,"Combat UI | TARGET-2",6,3,353,18,11)
+local watermarkText=label(watermark,"Combat UI | CONNECTED-1",6,3,353,18,11)
 
 local function activeRows()
 	local rows={}
@@ -820,7 +892,7 @@ R:BindToRenderStep("SimpleCombatHUD",Enum.RenderPriority.Last.Value,function(dt)
 	hudClock=hudClock+dt;fpsClock=fpsClock+dt;frames=frames+1
 	if hudClock>=.1 then refreshHUD();hudClock=0 end
 	if fpsClock>=.5 then
-		watermarkText.Text=string.format("Combat UI | TARGET-2 | %s | %d fps",me.Name,math.round(frames/fpsClock))
+		watermarkText.Text=string.format("Combat UI | CONNECTED-1 | %s | %d fps",me.Name,math.round(frames/fpsClock))
 		fpsClock,frames=0,0
 	end
 end)
@@ -1198,7 +1270,7 @@ on(U.InputBegan,function(input,processed)
             if rageConfig:GetAttribute("TeamCheck") and me.Team and me.Team==chosen.Team and not me.Neutral and not chosen.Neutral then
                 note("Team Check excluye a ese jugador.");return
             end
-            rageConfig:SetAttribute("SelectedUserId",chosen.UserId)
+            selectRageTarget(chosen)
             if targetPick then targetPick=false;panel.Visible=true;open.Visible=false;syncMenuControls(true) end
             rageConfig:SetAttribute("Selection","Manual")
             note("Objetivo seleccionado: "..chosen.Name);refresh()
