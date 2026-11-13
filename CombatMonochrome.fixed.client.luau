@@ -162,7 +162,7 @@ panel.AnchorPoint=Vector2.new(0,.5)
 panel.Position=UDim2.new(0,24,.5,0)
 outline(panel)
 local scale=new("UIScale",{},panel)
-local title=label(panel,"Combat UI | v4.1",9,4,410,19,12)
+local title=label(panel,"Combat UI | TARGET-2",9,4,410,19,12)
 rect(panel,7,27,546,2,"Accent")
 local function button(parent,text,x,y,w,h,fn)
 	local b=theme(new("TextButton",{Text=text,Position=UDim2.fromOffset(x,y),
@@ -305,7 +305,7 @@ end
 for i,name in ipairs({"Aimbot","ESP","Rage Bot","Settings"}) do
 	local page=new("ScrollingFrame",{Name=name,Position=UDim2.fromOffset(9,62),
 		Size=UDim2.fromOffset(542,510),BackgroundTransparency=1,BorderSizePixel=0,
-		ScrollBarThickness=3,CanvasSize=UDim2.fromOffset(0,name=="Settings" and 824 or 510),
+		ScrollBarThickness=3,CanvasSize=UDim2.fromOffset(0,name=="Settings" and 824 or name=="Rage Bot" and 745 or 510),
 		ScrollingDirection=Enum.ScrollingDirection.Y,Visible=name==UI.Tab},panel)
 	theme(page,"ScrollBarImageColor3","Accent")
 	pages[name]=page
@@ -427,8 +427,8 @@ local rageDefaults={Enabled=false,Aimbot=true,SilentAim=false,AutoShoot=false,Au
  FOV=200,Selection="Manual",TargetKey="T",SelectedUserId=0,Hitbox="Head",VisibilityCheck=true,AutoSwitch=true,
  RapidFire=false,Aim360=false,TeamCheck=true}
 for key,value in pairs(rageDefaults) do rageConfig:SetAttribute(key,value) end
-local rageLeft=group(pages["Rage Bot"],"Private weapon",4,13,258,350)
-local rageRight=group(pages["Rage Bot"],"Targeting",276,13,258,475)
+local rageLeft=group(pages["Rage Bot"],"Private weapon",4,235,258,350)
+local rageRight=group(pages["Rage Bot"],"Targeting",276,235,258,475)
 local rageFlags={{"Enabled","Rage Bot enabled"},{"Aimbot","Aimbot"},{"SilentAim","Silent Aim"},
  {"AutoShoot","Auto Shoot"},{"AutoWall","Auto Wall"},{"Wallbang","Wallbang"},
  {"Prediction","Target Prediction"},{"NoRecoil","No Recoil (weapon has none)"},
@@ -453,13 +453,20 @@ cycle(rageRight,"Hitbox Selection",9,155,239,aimParts,
 number(rageRight,"Prediction time (s)",9,210,239,function()return rageConfig:GetAttribute("PredictionTime")end,
  function(v)rageConfig:SetAttribute("PredictionTime",v)end,0,.25)
 local targetBinding=false
+local targetPick=false
+local targetControls=group(pages["Rage Bot"],"OBJETIVO",4,13,530,200)
 local observing=false
 local observedCamera,previousSubject
-label(rageRight,"Select target key",9,263,125,20)
-local selectKeyButton=button(rageRight,"[T]",139,263,109,20,function()
+button(targetControls,"Seleccionar objetivo",9,16,250,25,function()
+ targetPick=true;targetBinding=false;binding=false;menuBinding=false
+ panel.Visible=false;open.Visible=true;syncMenuControls(true)
+ note("Haz clic en el jugador. Escape cancela.")
+end)
+label(targetControls,"Asignar tecla",274,16,130,25)
+local selectKeyButton=button(targetControls,"[T]",408,16,109,25,function()
  targetBinding=not targetBinding;binding=false;menuBinding=false
 end)
-local selectedLabel=label(rageRight,"Target: none",9,292,239,20,11,"Muted")
+local selectedLabel=label(targetControls,"Objetivo: ninguno",9,51,508,20,11,"Muted")
 local observeButton
 local function endObserve()
  observing=false
@@ -475,7 +482,7 @@ local function selectedPlayer()
  local id=rageConfig:GetAttribute("SelectedUserId")
  return id and id~=0 and P:GetPlayerByUserId(id) or nil
 end
-observeButton=button(rageRight,"Observe",9,321,239,22,function()
+observeButton=button(targetControls,"Observar objetivo",9,81,250,25,function()
  if observing then endObserve();return end
  local p=selectedPlayer();local h=p and body(p.Character)
  local camera=workspace.CurrentCamera
@@ -484,18 +491,22 @@ observeButton=button(rageRight,"Observe",9,321,239,22,function()
  rageConfig:SetAttribute("Observing",true)
  camera.CameraSubject=h
 end)
-button(rageRight,"Clear target",9,351,239,22,function()
+button(targetControls,"Quitar objetivo",274,81,243,25,function()
  rageConfig:SetAttribute("SelectedUserId",0);endObserve()
 end)
-label(rageRight,"Mouse over player + chosen key.",9,389,239,20,11,"Muted")
-label(rageRight,"Enabled Rage options use this target.",9,415,239,20,11,"Muted")
-label(rageRight,"Weapon integration is required.",9,442,239,20,11,"Muted")
+button(targetControls,"Activar Rage sobre este objetivo",9,116,508,25,function()
+ if not selectedPlayer() then note("Selecciona un jugador primero.");return end
+ rageConfig:SetAttribute("Selection","Manual");rageConfig:SetAttribute("Enabled",true)
+ S.Aim=false;heldAim=false;target=nil;stickyTarget=nil;stopBot();refresh()
+ note("Las funciones habilitadas de Rage usan este objetivo.")
+end)
+label(targetControls,"Seleccionar no activa opciones apagadas. Arma integrada requerida.",9,158,508,27,11,"Muted")
 on(R.Heartbeat,function()
  local p=selectedPlayer()
  if p and not body(p.Character) then rageConfig:SetAttribute("SelectedUserId",0);p=nil end
- selectedLabel.Text="Target: "..(p and p.Name or "none")
+ selectedLabel.Text="Objetivo: "..(p and p.Name or "ninguno")
  selectKeyButton.Text=targetBinding and "[PRESS KEY]" or "["..rageConfig:GetAttribute("TargetKey").."]"
- observeButton.Text=observing and "Stop observing" or "Observe"
+ observeButton.Text=observing and "Dejar de observar" or "Observar objetivo"
  if observing then
   local h=p and body(p.Character)
   if not h or workspace.CurrentCamera~=observedCamera then endObserve()
@@ -535,7 +546,7 @@ activeLabel.TextYAlignment=Enum.TextYAlignment.Top
 activeLabel.TextTruncate=Enum.TextTruncate.None
 local watermark=rect(gui,8,8,365,23,"Background")
 outline(watermark);rect(watermark,0,0,365,1,"Accent")
-local watermarkText=label(watermark,"Combat UI | v4.1",6,3,353,18,11)
+local watermarkText=label(watermark,"Combat UI | TARGET-2",6,3,353,18,11)
 
 local function activeRows()
 	local rows={}
@@ -809,7 +820,7 @@ R:BindToRenderStep("SimpleCombatHUD",Enum.RenderPriority.Last.Value,function(dt)
 	hudClock=hudClock+dt;fpsClock=fpsClock+dt;frames=frames+1
 	if hudClock>=.1 then refreshHUD();hudClock=0 end
 	if fpsClock>=.5 then
-		watermarkText.Text=string.format("Combat UI | v4.1 | %s | %d fps",me.Name,math.round(frames/fpsClock))
+		watermarkText.Text=string.format("Combat UI | TARGET-2 | %s | %d fps",me.Name,math.round(frames/fpsClock))
 		fpsClock,frames=0,0
 	end
 end)
@@ -1164,7 +1175,7 @@ end
 on(U.InputBegan,function(input,processed)
     if input.KeyCode==Enum.KeyCode.Escape then
         closeDropdown()
-        targetBinding=false;endObserve()
+        targetBinding=false;targetPick=false;endObserve()
         binding=false;menuBinding=false;heldAim=false;S.Aim=false;stopAll();refresh();return
     end
     if U:GetFocusedTextBox() then return end
@@ -1174,7 +1185,8 @@ on(U.InputBegan,function(input,processed)
         end
         return
     end
-    if input.UserInputType==Enum.UserInputType.Keyboard and input.KeyCode.Name==rageConfig:GetAttribute("TargetKey")
+    if ((targetPick and input.UserInputType==Enum.UserInputType.MouseButton1)
+        or (input.UserInputType==Enum.UserInputType.Keyboard and input.KeyCode.Name==rageConfig:GetAttribute("TargetKey")))
         and not binding and not menuBinding and not GuiService.MenuIsOpen then
         local hit=me:GetMouse().Target
         local chosen=nil
@@ -1187,6 +1199,7 @@ on(U.InputBegan,function(input,processed)
                 note("Team Check excluye a ese jugador.");return
             end
             rageConfig:SetAttribute("SelectedUserId",chosen.UserId)
+            if targetPick then targetPick=false;panel.Visible=true;open.Visible=false;syncMenuControls(true) end
             rageConfig:SetAttribute("Selection","Manual")
             note("Objetivo seleccionado: "..chosen.Name);refresh()
         else note("Pon el mouse directamente sobre un jugador vivo.") end
