@@ -424,7 +424,7 @@ number(themeGroup,"Menu transparency",9,214,239,function()return UI.MenuAlpha en
 local rageConfig=new("Folder",{Name="RageSettings"},gui)
 local rageDefaults={Enabled=false,Aimbot=true,SilentAim=false,AutoShoot=false,AutoWall=false,
  Wallbang=false,Prediction=false,PredictionTime=0,NoRecoil=true,NoSpread=false,HitChance=0,
- FOV=200,Selection="Crosshair",Hitbox="Head",VisibilityCheck=true,AutoSwitch=true,
+ FOV=200,Selection="Manual",TargetKey="T",SelectedUserId=0,Hitbox="Head",VisibilityCheck=true,AutoSwitch=true,
  RapidFire=false,Aim360=false,TeamCheck=true}
 for key,value in pairs(rageDefaults) do rageConfig:SetAttribute(key,value) end
 local rageLeft=group(pages["Rage Bot"],"Private weapon",4,13,258,350)
@@ -446,20 +446,63 @@ number(rageRight,"FOV (px)",9,15,239,function()return rageConfig:GetAttribute("F
  function(v)rageConfig:SetAttribute("FOV",v)end,20,600)
 number(rageRight,"Hit Chance (%)",9,60,239,function()return rageConfig:GetAttribute("HitChance")end,
  function(v)rageConfig:SetAttribute("HitChance",v)end,0,100)
-cycle(rageRight,"Target Selection",9,105,239,{"Crosshair","Distance","Health"},
+cycle(rageRight,"Target Selection",9,105,239,{"Manual","Crosshair","Distance","Health"},
  function()return rageConfig:GetAttribute("Selection")end,function(v)rageConfig:SetAttribute("Selection",v)end)
 cycle(rageRight,"Hitbox Selection",9,155,239,aimParts,
  function()return rageConfig:GetAttribute("Hitbox")end,function(v)rageConfig:SetAttribute("Hitbox",v)end)
 number(rageRight,"Prediction time (s)",9,210,239,function()return rageConfig:GetAttribute("PredictionTime")end,
  function(v)rageConfig:SetAttribute("PredictionTime",v)end,0,.25)
-label(rageRight,"Requires the supplied weapon kit.",9,263,239,20,11,"Muted")
-label(rageRight,"Walls: Penetrable attribute only.",9,290,239,20,11,"Muted")
-label(rageRight,"Hit Chance: 48-ray estimate.",9,317,239,20,11,"Muted")
-label(rageRight,"Prediction: 0 for this hitscan gun.",9,344,239,20,11,"Muted")
-label(rageRight,"No recoil exists in this weapon.",9,371,239,20,11,"Muted")
-label(rageRight,"Server limits remain enforced.",9,398,239,20,11,"Muted")
-label(rageRight,"Escape / STOP ALL disables Rage.",9,425,239,20,11,"Muted")
-
+local targetBinding=false
+local observing=false
+local observedCamera,previousSubject
+label(rageRight,"Select target key",9,263,125,20)
+local selectKeyButton=button(rageRight,"[T]",139,263,109,20,function()
+ targetBinding=not targetBinding;binding=false;menuBinding=false
+end)
+local selectedLabel=label(rageRight,"Target: none",9,292,239,20,11,"Muted")
+local observeButton
+local function endObserve()
+ observing=false
+ rageConfig:SetAttribute("Observing",false)
+ if observedCamera and observedCamera==workspace.CurrentCamera then
+  local own=me.Character and me.Character:FindFirstChildOfClass("Humanoid")
+  if previousSubject and previousSubject.Parent then observedCamera.CameraSubject=previousSubject
+  elseif own then observedCamera.CameraSubject=own end
+ end
+ observedCamera=nil;previousSubject=nil
+end
+local function selectedPlayer()
+ local id=rageConfig:GetAttribute("SelectedUserId")
+ return id and id~=0 and P:GetPlayerByUserId(id) or nil
+end
+observeButton=button(rageRight,"Observe",9,321,239,22,function()
+ if observing then endObserve();return end
+ local p=selectedPlayer();local h=p and body(p.Character)
+ local camera=workspace.CurrentCamera
+ if not h or not camera then note("Selecciona un jugador vivo primero.");return end
+ observedCamera=camera;previousSubject=camera.CameraSubject;observing=true
+ rageConfig:SetAttribute("Observing",true)
+ camera.CameraSubject=h
+end)
+button(rageRight,"Clear target",9,351,239,22,function()
+ rageConfig:SetAttribute("SelectedUserId",0);endObserve()
+end)
+label(rageRight,"Mouse over player + chosen key.",9,389,239,20,11,"Muted")
+label(rageRight,"Enabled Rage options use this target.",9,415,239,20,11,"Muted")
+label(rageRight,"Weapon integration is required.",9,442,239,20,11,"Muted")
+on(R.Heartbeat,function()
+ local p=selectedPlayer()
+ if p and not body(p.Character) then rageConfig:SetAttribute("SelectedUserId",0);p=nil end
+ selectedLabel.Text="Target: "..(p and p.Name or "none")
+ selectKeyButton.Text=targetBinding and "[PRESS KEY]" or "["..rageConfig:GetAttribute("TargetKey").."]"
+ observeButton.Text=observing and "Stop observing" or "Observe"
+ if observing then
+  local h=p and body(p.Character)
+  if not h or workspace.CurrentCamera~=observedCamera then endObserve()
+  else observedCamera.CameraSubject=h end
+ end
+end)
+on(gui.Destroying,endObserve)
 local configGroup=group(pages.Settings,"Configuration",276,13,258,230)
 label(configGroup,"Config name",9,12,239,17)
 local configName=input(configGroup,"default",9,33,239,20)
@@ -918,6 +961,7 @@ stopBot=function()
 end
 stopAll=function()
 	rageConfig:SetAttribute("Enabled",false)
+	endObserve()
 	S.Enabled,target,stickyTarget=false,nil,nil
 	stopBot()
 	note("Detenido.")
@@ -1120,9 +1164,34 @@ end
 on(U.InputBegan,function(input,processed)
     if input.KeyCode==Enum.KeyCode.Escape then
         closeDropdown()
+        targetBinding=false;endObserve()
         binding=false;menuBinding=false;heldAim=false;S.Aim=false;stopAll();refresh();return
     end
     if U:GetFocusedTextBox() then return end
+    if targetBinding then
+        if input.UserInputType==Enum.UserInputType.Keyboard and input.KeyCode~=Enum.KeyCode.Unknown then
+            rageConfig:SetAttribute("TargetKey",input.KeyCode.Name);targetBinding=false
+        end
+        return
+    end
+    if input.UserInputType==Enum.UserInputType.Keyboard and input.KeyCode.Name==rageConfig:GetAttribute("TargetKey")
+        and not binding and not menuBinding and not GuiService.MenuIsOpen then
+        local hit=me:GetMouse().Target
+        local chosen=nil
+        while hit and hit~=workspace do
+            if hit:IsA("Model") then chosen=P:GetPlayerFromCharacter(hit);if chosen then break end end
+            hit=hit.Parent
+        end
+        if chosen and chosen~=me and body(chosen.Character) then
+            if rageConfig:GetAttribute("TeamCheck") and me.Team and me.Team==chosen.Team and not me.Neutral and not chosen.Neutral then
+                note("Team Check excluye a ese jugador.");return
+            end
+            rageConfig:SetAttribute("SelectedUserId",chosen.UserId)
+            rageConfig:SetAttribute("Selection","Manual")
+            note("Objetivo seleccionado: "..chosen.Name);refresh()
+        else note("Pon el mouse directamente sobre un jugador vivo.") end
+        return
+    end
     if menuBinding then
         if input.UserInputType==Enum.UserInputType.Keyboard and input.KeyCode~=Enum.KeyCode.Unknown then
             UI.MenuKey=input.KeyCode;menuBinding=false;refresh()
@@ -1364,7 +1433,7 @@ R:BindToRenderStep("SimpleCombatAim",Enum.RenderPriority.Camera.Value+1,function
 	circle.Visible=S.Enabled
 	local selected=nil
 	target=nil
-	if not rageConfig:GetAttribute("Enabled") and S.Enabled and (S.Aim or S.Mode~=nil) and body(me.Character)
+	if not observing and not rageConfig:GetAttribute("Enabled") and S.Enabled and (S.Aim or S.Mode~=nil) and body(me.Character)
 		and not binding and not menuBinding and not dragInput and not GuiService.MenuIsOpen and not U:GetFocusedTextBox() then
 		target,selected=pickClosest(camera,center,intentSwitch)
 	else stickyTarget=nil; mouseIntent=Vector2.zero
