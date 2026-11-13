@@ -1,4 +1,4 @@
--- VERSION 3.5: body-based player selection, then independent Head/Torso aiming.
+-- VERSION 4.0: body-based player selection, then independent Head/Torso aiming.
 -- COMBAT UI: siempre selecciona al jugador mas cercano a la mira dentro del FOV.
 -- Target lock ON = apuntado directo; OFF = usa Smoothness.
 -- Sticky OFF: holds the current valid target through jitter; deliberate mouse movement permits retargeting.
@@ -15,11 +15,12 @@ local old = pg:FindFirstChild("SimpleCombatUI")
 if old then old:Destroy() end
 
 local S = {Enabled=false, Aim=false, Lock=false, FOV=200, Smooth=0,
-	Part="Head", Center="Crosshair", Mode=nil, Key=Enum.KeyCode.Q, Sticky=false, TeamCheck=false, Skeleton=false, Tracer=false, Chams=false,
- ThroughWalls=true, Colors={Skeleton=Color3.new(1,1,1),Tracer=Color3.new(1,1,1),Chams=Color3.new(1,1,1)}}
+	Part="Head", Center="Crosshair", Mode=nil, Key=Enum.KeyCode.Q, Sticky=false, TeamCheck=false, Skeleton=false, Tracer=false, Chams=false, Names=false, Health=false,
+ ThroughWalls=true, Colors={Skeleton=Color3.new(1,1,1),Tracer=Color3.new(1,1,1),Chams=Color3.new(1,1,1),Names=Color3.new(1,1,1),Health=Color3.fromRGB(100,255,150)}}
 local binding=false
 local stickyTarget=nil
 local frameMotion,mouseIntent=Vector2.zero,Vector2.zero
+local injectedMotion,injectionExpires=Vector2.zero,0
 local alive, version, target, botTarget = true, 0, nil, nil
 local controls, driving, refresh = nil, false, nil
 local links, message, messageUntil = {}, "", 0
@@ -86,225 +87,584 @@ task.spawn(function()
 	end
 end)
 
--- UI: compact monochrome cards.
-local ink,paper,gray = Color3.fromRGB(15,15,16),Color3.fromRGB(246,246,243),Color3.fromRGB(135,135,137)
-local gui = new("ScreenGui",{Name="SimpleCombatUI",ResetOnSpawn=false,
-	DisplayOrder=100,ZIndexBehavior=Enum.ZIndexBehavior.Sibling},pg)
-local overlay = new("ScreenGui",{Name="SimpleCombatCircle",ResetOnSpawn=false,
+-- UI v4.0: reference-inspired monospace tabs.
+local Http=game:GetService("HttpService")
+local UI={Tab="Aimbot",MenuKey=Enum.KeyCode.RightShift,DisableMovement=false,
+	Indicators=true,IndicatorX=1,IndicatorY=35,Watermark=true,WatermarkPosition="Top left",
+	WatermarkX=1,WatermarkY=1,MenuAlpha=0,Discord="",
+	Theme={Main=Color3.fromRGB(16,16,18),Background=Color3.fromRGB(11,11,13),
+		Accent=Color3.fromRGB(165,95,240),Outline=Color3.fromRGB(67,67,72),
+		Text=Color3.fromRGB(225,225,230),Muted=Color3.fromRGB(145,145,155)}}
+local menuBinding=false
+local themeTargets,widgetUpdates,tabs,pages={},{},{},{}
+local controlsHeld=false
+local stopBot,stopAll,togglePanel,syncMenuControls
+local gui=new("ScreenGui",{Name="SimpleCombatUI",ResetOnSpawn=false,DisplayOrder=100,
+	ZIndexBehavior=Enum.ZIndexBehavior.Sibling},pg)
+local overlay=new("ScreenGui",{Name="SimpleCombatCircle",ResetOnSpawn=false,
 	IgnoreGuiInset=true,DisplayOrder=90},pg)
-local circle = new("Frame",{AnchorPoint=Vector2.new(.5,.5),
-	BackgroundTransparency=1,Visible=false},overlay)
+local circle=new("Frame",{AnchorPoint=Vector2.new(.5,.5),BackgroundTransparency=1,Visible=false},overlay)
 round(circle,10000)
-local stroke = new("UIStroke",{Color=gray,Thickness=1},circle)
-local dot = new("Frame",{AnchorPoint=Vector2.new(.5,.5),Position=UDim2.fromScale(.5,.5),
-	Size=UDim2.fromOffset(4,4),BackgroundColor3=paper,BorderSizePixel=0},circle)
-round(dot,4)
-
-local panel = new("Frame",{AnchorPoint=Vector2.new(0,.5),Position=UDim2.new(0,20,.5,0),
-	Size=UDim2.fromOffset(430,428),BackgroundColor3=paper,BorderSizePixel=0},gui)
-round(panel,16)
-new("UIStroke",{Color=ink,Thickness=2},panel)
-local scale = new("UIScale",{},panel)
-local function txt(parent,text,x,y,w,h,size,color,font)
-	return new("TextLabel",{Text=text,Position=UDim2.fromOffset(x,y),
-		Size=UDim2.fromOffset(w,h),BackgroundTransparency=1,TextColor3=color or ink,
-		Font=font or Enum.Font.GothamMedium,TextSize=size or 12,
-		TextXAlignment=Enum.TextXAlignment.Left,TextTruncate=Enum.TextTruncate.AtEnd},parent)
+local stroke=new("UIStroke",{Color=Color3.fromRGB(180,180,190),Thickness=1},circle)
+local dot=new("Frame",{AnchorPoint=Vector2.new(.5,.5),Position=UDim2.fromScale(.5,.5),
+	Size=UDim2.fromOffset(3,3),BackgroundColor3=Color3.new(1,1,1),BorderSizePixel=0},circle)
+local function theme(item,property,role)
+	item[property]=UI.Theme[role]
+	table.insert(themeTargets,{item,property,role})
+	return item
 end
-local function smallButton(text,x,y,w,h,parent)
-	local b=new("TextButton",{Text=text,Position=UDim2.fromOffset(x,y),
-		Size=UDim2.fromOffset(w,h),BackgroundColor3=ink,TextColor3=paper,
-		TextSize=12,Font=Enum.Font.GothamBold,BorderSizePixel=0},parent or panel)
-	round(b,9)
+local function outline(item)
+	return theme(new("UIStroke",{Thickness=1,ApplyStrokeMode=Enum.ApplyStrokeMode.Border},item),"Color","Outline")
+end
+local function label(parent,text,x,y,w,h,size,role)
+	return theme(new("TextLabel",{Text=text,Position=UDim2.fromOffset(x,y),
+		Size=UDim2.fromOffset(w,h),Font=Enum.Font.Code,TextSize=size or 12,
+		TextXAlignment=Enum.TextXAlignment.Left,TextTruncate=Enum.TextTruncate.AtEnd,
+		BackgroundTransparency=1,BorderSizePixel=0},parent),"TextColor3",role or "Text")
+end
+local function rect(parent,x,y,w,h,role)
+	return theme(new("Frame",{Position=UDim2.fromOffset(x,y),Size=UDim2.fromOffset(w,h),
+		BorderSizePixel=0},parent),"BackgroundColor3",role or "Main")
+end
+local panel=rect(gui,20,80,560,620,"Main")
+panel.AnchorPoint=Vector2.new(0,.5)
+panel.Position=UDim2.new(0,24,.5,0)
+outline(panel)
+local scale=new("UIScale",{},panel)
+local title=label(panel,"Combat UI | v4.0",9,4,410,19,12)
+rect(panel,7,27,546,2,"Accent")
+local function button(parent,text,x,y,w,h,fn)
+	local b=theme(new("TextButton",{Text=text,Position=UDim2.fromOffset(x,y),
+		Size=UDim2.fromOffset(w,h),Font=Enum.Font.Code,TextSize=12,
+		BorderSizePixel=0,AutoButtonColor=true},parent),"BackgroundColor3","Background")
+	theme(b,"TextColor3","Text"); outline(b)
+	if fn then on(b.Activated,fn) end
 	return b
 end
-local badge=smallButton("+",16,16,34,34)
-badge.Active=false
-badge.AutoButtonColor=false
-txt(panel,"COMBAT",60,12,140,27,22,ink,Enum.Font.GothamBlack)
-txt(panel,"CONTROL PANEL v3.5",61,39,150,12,9,gray)
-local activeCount=smallButton("KEY: Q",254,20,90,26)
-activeCount.Active=true
-activeCount.AutoButtonColor=true
-local hide=smallButton("-",354,20,26,26)
-local close=smallButton("X",387,20,26,26)
-local open=smallButton("COMBAT  +",18,100,116,34,gui)
+local hide=button(panel,"_",502,5,21,17)
+local close=button(panel,"X",529,5,21,17)
+local open=button(gui,"Combat UI [+]",18,100,116,23)
 open.Visible=false
-
--- A small checker accent, rather than a full patterned background.
-for i=0,55 do
-	new("Frame",{Position=UDim2.fromOffset(19+i*7,63+(i%2)*3),
-		Size=UDim2.fromOffset(7,3),BackgroundColor3=ink,BorderSizePixel=0},panel)
+local function input(parent,text,x,y,w,h,changed)
+	local box=theme(new("TextBox",{Text=text,Position=UDim2.fromOffset(x,y),
+		Size=UDim2.fromOffset(w,h),Font=Enum.Font.Code,TextSize=12,ClearTextOnFocus=false,
+		TextXAlignment=Enum.TextXAlignment.Left,BorderSizePixel=0},parent),"BackgroundColor3","Background")
+	theme(box,"TextColor3","Text"); outline(box)
+	new("UIPadding",{PaddingLeft=UDim.new(0,4),PaddingRight=UDim.new(0,4)},box)
+	if changed then on(box.FocusLost,function() changed(box.Text,box) end) end
+	return box
 end
-local sectionInfo=txt(panel,"AIM & AUTOMATION",17,77,310,13,9,gray)
-local buttons,cards={},{}
-local function card(key,title,subtitle,x,y)
-	local shadow=new("Frame",{Position=UDim2.fromOffset(x+2,y+3),
-		Size=UDim2.fromOffset(194,46),BackgroundColor3=Color3.fromRGB(185,185,182),
-		BorderSizePixel=0,ZIndex=1},panel)
-	round(shadow,11)
-	local b=new("TextButton",{Text="",Position=UDim2.fromOffset(x,y),
-		Size=UDim2.fromOffset(194,46),BackgroundColor3=paper,
-		BorderSizePixel=0,AutoButtonColor=false,ZIndex=2},panel)
-	round(b,11)
-	new("UIStroke",{Color=ink,Thickness=1.5,ApplyStrokeMode=Enum.ApplyStrokeMode.Border},b)
-	local name=txt(b,title,10,7,121,17,12)
-	local sub=txt(b,subtitle,10,25,121,12,9,gray)
-	name.ZIndex,sub.ZIndex=3,3
-	local track=new("Frame",{Position=UDim2.fromOffset(143,12),
-		Size=UDim2.fromOffset(41,22),BackgroundColor3=Color3.fromRGB(216,216,212),
-		BorderSizePixel=0,ZIndex=3},b)
-	round(track,11)
-	new("UIStroke",{Color=ink,Thickness=1},track)
-	local word=txt(track,"OFF",20,0,19,22,7,ink,Enum.Font.GothamBold)
-	word.ZIndex=4
-	local knob=new("Frame",{Position=UDim2.fromOffset(2,2),
-		Size=UDim2.fromOffset(18,18),BackgroundColor3=paper,BorderSizePixel=0,ZIndex=5},track)
-	round(knob,9)
-	new("UIStroke",{Color=ink,Thickness=1},knob)
-	cards[key]={Button=b,Title=name,Sub=sub,Track=track,Knob=knob,Word=word}
-	buttons[key]=b
+local function group(parent,titleText,x,y,w,h)
+	local f=rect(parent,x,y,w,h,"Main"); outline(f)
+	rect(f,5,0,w-10,1,"Accent")
+	local name=label(f," "..titleText.." ",8,-8,math.min(w-16,#titleText*7+14),16,12)
+	name.BackgroundTransparency=0; theme(name,"BackgroundColor3","Main")
+	return f
+end
+local function check(parent,titleText,x,y,w,get,set)
+	local b=new("TextButton",{Text="",Position=UDim2.fromOffset(x,y),Size=UDim2.fromOffset(w,21),
+		BackgroundTransparency=1,AutoButtonColor=false},parent)
+	local square=rect(b,2,6,9,9,"Background"); outline(square)
+	local text=label(b,titleText,17,0,w-17,21,12)
+	table.insert(widgetUpdates,function()
+		square.BackgroundColor3=get() and UI.Theme.Accent or UI.Theme.Background
+	end)
+	on(b.Activated,function() set(not get()); refresh() end)
 	return b
 end
-card("Enabled","Toggle","Main switch",16,97)
-card("Aim","Aimbot","Nearest to the reticle",220,97)
-card("Lock","Target lock","Instant aim",16,151)
-local auto=card("Auto","Autoplay","Move + attack",220,151)
-local kill=card("All","Kill all","One pass",16,205)
-
-local function choice(key,title,x,y,value)
-	local b=new("TextButton",{Text="",Position=UDim2.fromOffset(x,y),
-		Size=UDim2.fromOffset(194,46),BackgroundColor3=Color3.fromRGB(232,232,228),
-		BorderSizePixel=0,AutoButtonColor=true},panel)
-	round(b,10)
-	txt(b,title,10,5,174,14,9,gray)
-	local valueLabel=txt(b,value,10,21,153,20,12,ink,Enum.Font.GothamBold)
-	txt(b,">",174,21,12,20,12)
-	buttons[key]=b
-	return valueLabel
-end
-local partValue=choice("Part","AIM PART",220,205,S.Part)
-local centerValue=choice("Center","AIM CENTER",16,259,S.Center)
-local sticky=card("Sticky","Sticky","Keep current target",220,259)
-local emergency=smallButton("STOP ALL",334,370,80,22)
-local function number(key,title,x,y,minimum,maximum,suffix)
-	local holder=new("Frame",{Position=UDim2.fromOffset(x,y),
-		Size=UDim2.fromOffset(194,43),BackgroundColor3=Color3.fromRGB(232,232,228),
-		BorderSizePixel=0},panel)
-	round(holder,10)
-	txt(holder,title,10,5,118,15,10,ink,Enum.Font.GothamBold)
-	txt(holder,suffix,10,23,118,12,9,gray)
-	local box=new("TextBox",{Text=tostring(S[key]),Position=UDim2.fromOffset(137,7),
-		Size=UDim2.fromOffset(47,29),BackgroundColor3=paper,TextColor3=ink,
-		Font=Enum.Font.GothamBold,TextSize=13,ClearTextOnFocus=false,BorderSizePixel=0},holder)
-	round(box,7)
-	on(box.FocusLost,function()
-		local n=tonumber(box.Text)
-		if n and n==n and math.abs(n)<math.huge then
-			S[key]=math.clamp(math.floor(n+.5),minimum,maximum)
+local function number(parent,titleText,x,y,w,get,set,minimum,maximum)
+	label(parent,titleText,x,y,w-60,19,12)
+	local box=input(parent,tostring(get()),x+w-56,y,56,19,function(text,b)
+		local n=tonumber(text)
+		if n and n==n and math.abs(n)<math.huge then set(math.clamp(n,minimum,maximum)) end
+		b.Text=tostring(get()); refresh()
+	end)
+	local track=rect(parent,x,y+24,w,5,"Background")
+	local fill=rect(track,0,0,w,5,"Accent")
+	local hit=new("TextButton",{Text="",BackgroundTransparency=1,
+		Position=UDim2.fromOffset(x,y+20),Size=UDim2.fromOffset(w,13),ZIndex=3},parent)
+	local held=nil
+	local function slide(position)
+		local ratio=math.clamp((position.X-track.AbsolutePosition.X)/math.max(1,track.AbsoluteSize.X),0,1)
+		local value=minimum+(maximum-minimum)*ratio
+		set(maximum<=1 and math.round(value*100)/100 or math.round(value));refresh()
+	end
+	on(hit.InputBegan,function(event)
+		if event.UserInputType==Enum.UserInputType.MouseButton1 or event.UserInputType==Enum.UserInputType.Touch then
+			held=event;slide(event.Position)
 		end
-		box.Text=tostring(S[key])
+	end)
+	on(U.InputChanged,function(event)
+		if held and (event==held or (held.UserInputType==Enum.UserInputType.MouseButton1
+			and event.UserInputType==Enum.UserInputType.MouseMovement)) then slide(event.Position) end
+	end)
+	on(U.InputEnded,function(event)
+		if event==held or (held and event.UserInputType==Enum.UserInputType.MouseButton1) then held=nil end
+	end)
+	table.insert(widgetUpdates,function()
+		if not box:IsFocused() then box.Text=tostring(get()) end
+		fill.Size=UDim2.new((get()-minimum)/(maximum-minimum),0,1,0)
 	end)
 end
-number("FOV","FOV",16,316,20,600,"Radius / pixels")
-number("Smooth","SMOOTHNESS",220,316,0,100,"0 instant - 100 slow")
-local status=txt(panel,"Ready",17,370,307,20,11,ink)
-new("Frame",{Position=UDim2.fromOffset(16,399),Size=UDim2.fromOffset(398,1),
-	BackgroundColor3=Color3.fromRGB(205,205,200),BorderSizePixel=0},panel)
-txt(panel,"Drag COMBAT to move / Right Shift: menu / Backspace: stop",17,405,396,15,9,gray)
-
-refresh=function()
-	local count=0
-	for key,c in pairs(cards) do
-		local enabled
-		if key=="Auto" then enabled=S.Mode=="Auto"
-		elseif key=="All" then enabled=S.Mode=="All"
-		else enabled=S[key] end
-		if enabled then count=count+1 end
-		c.Button.BackgroundColor3=enabled and ink or paper
-		c.Title.TextColor3=enabled and paper or ink
-		c.Sub.TextColor3=enabled and Color3.fromRGB(185,185,185) or gray
-		c.Track.BackgroundColor3=enabled and paper or Color3.fromRGB(216,216,212)
-		c.Knob.BackgroundColor3=enabled and ink or paper
-		c.Knob.Position=UDim2.fromOffset(enabled and 21 or 2,2)
-		c.Word.Position=UDim2.fromOffset(enabled and 3 or 20,0)
-		c.Word.Text=enabled and "ON" or "OFF"
-	end
-	partValue.Text=S.Part
-	centerValue.Text=S.Center
-	activeCount.Text=binding and "PRESS KEY" or ("KEY: "..S.Key.Name)
-	activeCount.TextSize=#S.Key.Name>7 and 9 or 12
-end
-
--- ESP page: independent feature colors, shared team filter.
-local combatWidgets={}
-for _,item in ipairs(panel:GetChildren()) do
-	if item:IsA("GuiObject") and item.Position.Y.Offset>=97 and item.Position.Y.Offset<360 then
-		table.insert(combatWidgets,item)
-	end
-end
-local espTab=smallButton("ESP >",334,74,80,18)
-local espPage=new("Frame",{Name="ESPPage",Position=UDim2.fromOffset(16,97),
-	Size=UDim2.fromOffset(398,262),BackgroundTransparency=1,Visible=false},panel)
-local espButtons,colorBoxes={},{}
-local function espToggle(key,title,x,y,w,h)
-	local b=smallButton(title..": OFF",x,y,w,h,espPage)
-	espButtons[key]={Button=b,Title=title}
-	on(b.Activated,function()
-		S[key]=not S[key]
-		if (key=="Skeleton" or key=="Tracer" or key=="Chams") and S[key] then S.Enabled=true end
-		if key=="TeamCheck" then stickyTarget=nil; target=nil end
-		refresh()
+local function cycle(parent,titleText,x,y,w,values,get,set)
+	label(parent,titleText,x,y,w,17,12)
+	local b=button(parent,"",x,y+19,w,20,function()
+		local index=table.find(values,get()) or 1
+		set(values[index%#values+1]); refresh()
 	end)
+	table.insert(widgetUpdates,function() b.Text=tostring(get()).."  >" end)
 	return b
 end
-local function colorText(color)
-	return string.format("%02X%02X%02X",math.floor(color.R*255+.5),
-		math.floor(color.G*255+.5),math.floor(color.B*255+.5))
+local function colorHex(c)
+	return string.format("%02X%02X%02X",math.round(c.R*255),math.round(c.G*255),math.round(c.B*255))
 end
-for i,entry in ipairs({{"Skeleton","Skeleton"},{"Tracer","Tracer"},{"Chams","Chams"}}) do
-	local key,title=entry[1],entry[2]
-	local y=(i-1)*54
-	espToggle(key,title,0,y,230,44)
-	local box=new("TextBox",{Text="#"..colorText(S.Colors[key]),
-		Position=UDim2.fromOffset(242,y),Size=UDim2.fromOffset(156,44),
-		BackgroundColor3=S.Colors[key],TextColor3=ink,BorderSizePixel=0,
-		Font=Enum.Font.GothamBold,TextSize=13,ClearTextOnFocus=false},espPage)
-	round(box,10)
-	new("UIStroke",{Color=ink,Thickness=1},box)
-	colorBoxes[key]=box
-	on(box.FocusLost,function()
-		local hex=box.Text:gsub("%s",""):gsub("^#","")
-		if #hex==6 and hex:match("^%x+$") then
-			S.Colors[key]=Color3.fromRGB(tonumber(hex:sub(1,2),16),
-				tonumber(hex:sub(3,4),16),tonumber(hex:sub(5,6),16))
-		else note("Color: usa 6 digitos HEX, ejemplo FF4040.") end
-		refresh()
+local function parseColor(value)
+	local hex=type(value)=="string" and value:gsub("%s",""):gsub("^#","") or ""
+	if #hex~=6 or not hex:match("^%x+$") then return nil end
+	return Color3.fromRGB(tonumber(hex:sub(1,2),16),tonumber(hex:sub(3,4),16),tonumber(hex:sub(5,6),16))
+end
+local function colorField(parent,titleText,x,y,w,get,set)
+	label(parent,titleText,x,y,w-99,20,12)
+	local swatch=rect(parent,x+w-94,y+4,15,12,"Accent")
+	local box=input(parent,colorHex(get()),x+w-73,y,73,20,function(value,b)
+		local c=parseColor(value)
+		if c then set(c) else note("Color HEX: usa 6 digitos, ejemplo A55FF0.") end
+		b.Text=colorHex(get()); refresh()
+	end)
+	table.insert(widgetUpdates,function()
+		swatch.BackgroundColor3=get()
+		if not box:IsFocused() then box.Text=colorHex(get()) end
 	end)
 end
-espToggle("TeamCheck","Team Check",0,168,194,40)
-espToggle("ThroughWalls","ESP walls",204,168,194,40)
-txt(espPage,"Color HEX: FF4040 rojo / 00DDFF cyan / FFFFFF blanco",0,219,398,18,10,gray)
-txt(espPage,"Team Check se aplica a ESP, aimbot y autoplay.",0,240,398,18,10,gray)
-on(espTab.Activated,function()
-	espPage.Visible=not espPage.Visible
-	for _,item in ipairs(combatWidgets) do item.Visible=not espPage.Visible end
-	espTab.Text=espPage.Visible and "< COMBAT" or "ESP >"
+local function applyTheme()
+	for _,entry in ipairs(themeTargets) do
+		if entry[1].Parent then entry[1][entry[2]]=UI.Theme[entry[3]] end
+	end
+	panel.BackgroundTransparency=UI.MenuAlpha
+end
+
+for i,name in ipairs({"Aimbot","ESP","Settings"}) do
+	local page=new("ScrollingFrame",{Name=name,Position=UDim2.fromOffset(9,62),
+		Size=UDim2.fromOffset(542,510),BackgroundTransparency=1,BorderSizePixel=0,
+		ScrollBarThickness=3,CanvasSize=UDim2.fromOffset(0,name=="Settings" and 824 or 510),
+		ScrollingDirection=Enum.ScrollingDirection.Y,Visible=name==UI.Tab},panel)
+	theme(page,"ScrollBarImageColor3","Accent")
+	pages[name]=page
+	local tab=button(panel,name,9+(i-1)*92,35,86,21,function()
+		UI.Tab=name
+		for key,p in pairs(pages) do p.Visible=key==name end
+		refresh()
+	end)
+	tabs[name]=tab
+end
+local espPage=pages.ESP
+local sectionInfo=label(panel,"",10,579,438,16,11,"Muted")
+local status=label(panel,"Ready",10,598,438,16,11)
+local emergency=button(panel,"STOP ALL",458,581,91,29)
+
+-- Existing combat controls retain their handlers.
+local buttons={}
+local a=group(pages.Aimbot,"Aimbot",4,13,258,226)
+buttons.Enabled=check(a,"Master enabled",8,12,240,function()return S.Enabled end,function()end)
+buttons.Aim=check(a,"Enabled",8,35,240,function()return S.Aim end,function()end)
+-- Existing handlers below own these two state changes.
+buttons.Lock=check(a,"Direct aim",8,58,240,function()return S.Lock end,function()end)
+local sticky=check(a,"Sticky target",8,81,240,function()return S.Sticky end,function()end)
+label(a,"Toggle key",9,110,100,20)
+local activeCount=button(a,"[Q]",130,110,118,20)
+buttons.Center=cycle(a,"Aim mode",9,140,239,{"Camera","Mouse"},
+	function()return S.Center=="Cursor" and "Mouse" or "Camera" end,function()end)
+buttons.Part=cycle(a,"Target part",9,181,239,{"Head","Torso"},function()return S.Part end,function()end)
+local b=group(pages.Aimbot,"Automation",276,13,258,157)
+local auto=check(b,"Autoplay",8,12,240,function()return S.Mode=="Auto" end,function()end)
+local kill=check(b,"Kill all / one pass",8,35,240,function()return S.Mode=="All" end,function()end)
+label(b,"Uses the equipped Tool.",9,66,239,18,11,"Muted")
+label(b,"Damage depends on the game.",9,84,239,18,11,"Muted")
+label(b,"Backspace stops all features.",9,112,239,18,11,"Muted")
+local c=group(pages.Aimbot,"Targeting",4,257,258,146)
+number(c,"FOV radius (px)",9,15,239,function()return S.FOV end,function(v)S.FOV=math.round(v)end,20,600)
+number(c,"Smoothness",9,58,239,function()return S.Smooth end,function(v)S.Smooth=math.round(v)end,0,100)
+check(c,"Team check",8,106,240,function()return S.TeamCheck end,
+	function(v)S.TeamCheck=v;stickyTarget=nil;target=nil end)
+local d=group(pages.Aimbot,"Information",276,191,258,126)
+label(d,"Nearest visible player first.",9,13,239,18,11,"Muted")
+label(d,"Head / Torso is independent.",9,34,239,18,11,"Muted")
+label(d,"Mouse mode needs a free cursor.",9,55,239,18,11,"Muted")
+label(d,"Drag the title bar to move.",9,87,239,18,11,"Muted")
+
+local effects=group(pages.ESP,"Visuals",4,13,258,205)
+local colors=group(pages.ESP,"Colors",276,13,258,205)
+for i,entry in ipairs({{"Skeleton","Skeleton"},{"Tracer","Tracer"},{"Chams","Chams"},{"Names","Names"},{"Health","Health"}}) do
+	local key,titleText=entry[1],entry[2]
+	check(effects,titleText,8,14+(i-1)*30,240,function()return S[key] end,
+		function(v)S[key]=v;if v then S.Enabled=true end end)
+	colorField(colors,titleText,9,14+(i-1)*30,239,function()return S.Colors[key]end,
+		function(v)S.Colors[key]=v end)
+end
+local filters=group(pages.ESP,"Filters",4,239,258,100)
+check(filters,"Team check",8,14,240,function()return S.TeamCheck end,
+	function(v)S.TeamCheck=v;stickyTarget=nil;target=nil end)
+check(filters,"Show through walls",8,40,240,function()return S.ThroughWalls end,function(v)S.ThroughWalls=v end)
+label(filters,"Wall setting affects ESP only.",9,69,239,17,11,"Muted")
+local info=group(pages.ESP,"Indicators",276,239,258,100)
+label(info,"All visual effects share one",9,15,239,18,11,"Muted")
+label(info,"entry in the active list: ESP.",9,35,239,18,11,"Muted")
+label(info,"Names and health remain in-game.",9,68,239,18,11,"Muted")
+
+-- Settings modeled on the supplied references.
+local settingsActions={}
+local main=group(pages.Settings,"Main",4,13,258,230)
+label(main,"Open / close",9,12,130,20)
+local menuKeyButton=button(main,"[RIGHTSHIFT]",139,12,109,20,function()
+	menuBinding=not menuBinding;binding=false;refresh()
 end)
-local refreshCombat=refresh
+check(main,"Disable movement if open",8,36,240,function()return UI.DisableMovement end,
+	function(v)UI.DisableMovement=v;if syncMenuControls then syncMenuControls(true) end end)
+settingsActions.Rejoin=button(main,"Rejoin server",9,65,239,20)
+settingsActions.Copy=button(main,"Copy join script",9,90,239,20)
+settingsActions.Unload=button(main,"Unload",9,115,239,20,function()gui:Destroy()end)
+label(main,"Discord invite (optional)",9,144,239,17,11,"Muted")
+local discordBox=input(main,"",9,164,239,19,function(value)UI.Discord=value end)
+settingsActions.JoinDiscord=button(main,"Join Discord",9,190,116,20)
+settingsActions.CopyDiscord=button(main,"Copy Discord",132,190,116,20)
+
+local keys=group(pages.Settings,"Keybinds",4,265,258,137)
+check(keys,"Keybind indicator",8,12,240,function()return UI.Indicators end,function(v)UI.Indicators=v end)
+number(keys,"Position X (%)",9,42,239,function()return UI.IndicatorX end,function(v)UI.IndicatorX=v end,0,100)
+number(keys,"Position Y (%)",9,85,239,function()return UI.IndicatorY end,function(v)UI.IndicatorY=v end,0,100)
+
+local water=group(pages.Settings,"Watermark",4,424,258,184)
+check(water,"Enabled",8,12,240,function()return UI.Watermark end,function(v)UI.Watermark=v end)
+cycle(water,"Position",9,40,239,{"Top left","Top right","Custom"},
+	function()return UI.WatermarkPosition end,function(v)UI.WatermarkPosition=v end)
+number(water,"Custom X (%)",9,88,239,function()return UI.WatermarkX end,function(v)UI.WatermarkX=v end,0,100)
+number(water,"Custom Y (%)",9,131,239,function()return UI.WatermarkY end,function(v)UI.WatermarkY=v end,0,100)
+
+local themeGroup=group(pages.Settings,"Theme",276,265,258,265)
+local presets={"Purple","Blue","Red"}
+local preset="Purple"
+cycle(themeGroup,"Presets",9,12,239,presets,function()return preset end,function(v)
+	preset=v
+	UI.Theme.Accent=v=="Red" and Color3.fromRGB(220,60,70)
+		or v=="Blue" and Color3.fromRGB(75,140,220) or Color3.fromRGB(165,95,240)
+	applyTheme()
+end)
+for i,entry in ipairs({{"Main","Main color"},{"Accent","Accent color"},{"Background","Background"},
+	{"Outline","Outline color"},{"Text","Text color"},{"Muted","Secondary text"}}) do
+	local key,titleText=entry[1],entry[2]
+	colorField(themeGroup,titleText,9,61+(i-1)*24,239,function()return UI.Theme[key]end,
+		function(v)UI.Theme[key]=v;applyTheme()end)
+end
+number(themeGroup,"Menu transparency",9,214,239,function()return UI.MenuAlpha end,
+	function(v)UI.MenuAlpha=v;applyTheme()end,0,.65)
+
+local configGroup=group(pages.Settings,"Configuration",276,13,258,230)
+label(configGroup,"Config name",9,12,239,17)
+local configName=input(configGroup,"default",9,33,239,20)
+label(configGroup,"Config list",9,60,239,17)
+local configSelect=button(configGroup,"none  >",9,80,239,20)
+settingsActions.Load=button(configGroup,"Load",9,108,116,20)
+settingsActions.Save=button(configGroup,"Save",132,108,116,20)
+settingsActions.Create=button(configGroup,"Create",9,133,116,20)
+settingsActions.Delete=button(configGroup,"Delete",132,133,116,20)
+settingsActions.Refresh=button(configGroup,"Refresh list",9,158,239,20)
+local storageLabel=label(configGroup,"Session storage",9,193,239,17,11,"Muted")
+
+local credits=group(pages.Settings,"Credits",276,552,258,104)
+label(credits,"Combat UI - custom build",9,15,239,18)
+label(credits,"UI inspired by your references.",9,40,239,18,11,"Muted")
+label(credits,"v4.0 / client-side interface",9,68,239,18,11,"Muted")
+local help=group(pages.Settings,"Controls",4,630,258,146)
+label(help,"Mouse buttons cannot be keybinds.",9,14,239,18,11,"Muted")
+label(help,"Escape cancels key assignment.",9,36,239,18,11,"Muted")
+label(help,"UI settings do not change",9,65,239,18,11,"Muted")
+label(help,"the targeting or damage rules.",9,84,239,18,11,"Muted")
+label(help,"Config load stops automation.",9,115,239,18,11,"Muted")
+
+-- Side indicator: ESP is deliberately a single line.
+local indicator=rect(gui,8,180,236,140,"Main")
+outline(indicator);rect(indicator,0,0,236,2,"Accent")
+label(indicator,"keybinds / active",7,6,222,18,12)
+local activeLabel=label(indicator,"",7,29,222,150,11)
+activeLabel.TextYAlignment=Enum.TextYAlignment.Top
+activeLabel.TextTruncate=Enum.TextTruncate.None
+local watermark=rect(gui,8,8,365,23,"Background")
+outline(watermark);rect(watermark,0,0,365,1,"Accent")
+local watermarkText=label(watermark,"Combat UI | v4.0",6,3,353,18,11)
+
+local function activeRows()
+	local rows={}
+	if S.Enabled then
+		if S.Aim or S.Mode then
+			table.insert(rows,"["..S.Key.Name.."] "..(S.Center=="Cursor" and "mouse" or "camera").." aimbot (Toggle)")
+		end
+		if S.Sticky then table.insert(rows,"[-] sticky target") end
+		if S.Lock then table.insert(rows,"[-] direct aim") end
+		if S.Mode then table.insert(rows,"[-] "..(S.Mode=="Auto" and "autoplay" or "kill all")) end
+		if S.Skeleton or S.Tracer or S.Chams or S.Names or S.Health then table.insert(rows,"[-] ESP") end
+		if S.TeamCheck then table.insert(rows,"[-] team check") end
+	end
+	if #rows==0 then table.insert(rows,"no active features") end
+	return rows
+end
+local function refreshHUD()
+	local area=gui.AbsoluteSize
+	local rows=activeRows()
+	local height=35+#rows*17
+	indicator.Size=UDim2.fromOffset(236,height)
+	indicator.Position=UDim2.fromOffset(math.clamp(area.X*UI.IndicatorX/100,0,math.max(0,area.X-236)),
+		math.clamp(area.Y*UI.IndicatorY/100,0,math.max(0,area.Y-height)))
+	indicator.Visible=UI.Indicators
+	activeLabel.Size=UDim2.fromOffset(222,#rows*17)
+	activeLabel.Text=table.concat(rows,"\n")
+	local x,y=8,8
+	if UI.WatermarkPosition=="Top right" then x=math.max(0,area.X-373)
+	elseif UI.WatermarkPosition=="Custom" then x=area.X*UI.WatermarkX/100;y=area.Y*UI.WatermarkY/100 end
+	watermark.Position=UDim2.fromOffset(math.clamp(x,0,math.max(0,area.X-365)),
+		math.clamp(y,0,math.max(0,area.Y-23)))
+	watermark.Visible=UI.Watermark
+end
 refresh=function()
-	refreshCombat()
-	for key,entry in pairs(espButtons) do
-		entry.Button.Text=entry.Title..(S[key] and ": ON" or ": OFF")
-		entry.Button.BackgroundColor3=S[key] and ink or Color3.fromRGB(218,218,213)
-		entry.Button.TextColor3=S[key] and paper or ink
+	for _,fn in ipairs(widgetUpdates) do fn() end
+	for name,tab in pairs(tabs) do
+		tab.TextColor3=name==UI.Tab and UI.Theme.Accent or UI.Theme.Text
 	end
-	for key,box in pairs(colorBoxes) do
-		local color=S.Colors[key]
-		box.Text="#"..colorText(color)
-		box.BackgroundColor3=color
-		box.TextColor3=(color.R*.299+color.G*.587+color.B*.114)>.55 and ink or paper
+	activeCount.Text=binding and "[PRESS KEY]" or ("["..S.Key.Name.."]")
+	menuKeyButton.Text=menuBinding and "[PRESS KEY]" or ("["..UI.MenuKey.Name.."]")
+	refreshHUD()
+end
+syncMenuControls=function(force)
+	local desired=alive and (driving or (UI.DisableMovement and panel.Visible))
+	if controls and (force or desired~=controlsHeld) then
+		local ok=pcall(function()if desired then controls:Disable() else controls:Enable() end end)
+		if ok then controlsHeld=desired end
 	end
+end
+
+
+do
+-- Configurations use JSON only; no downloaded config code is executed.
+local configStore={Configs={},Themes={}}
+local selectedConfig,selectedTheme=nil,nil
+local configFile="CombatUI-configs.json"
+local persistent=type(readfile)=="function" and type(writefile)=="function"
+local boolKeys={"Enabled","Aim","Lock","Sticky","TeamCheck","Skeleton","Tracer","Chams","Names","Health","ThroughWalls"}
+local uiBoolKeys={"DisableMovement","Indicators","Watermark"}
+local uiNumberLimits={IndicatorX={0,100},IndicatorY={0,100},WatermarkX={0,100},WatermarkY={0,100},MenuAlpha={0,.65}}
+local function validName(name)
+	return type(name)=="string" and #name>0 and #name<=32 and name:match("^[%w_-]+$")~=nil
+end
+local function snapshot()
+	local data={Version=4,State={FOV=S.FOV,Smooth=S.Smooth,Part=S.Part,Center=S.Center,Key=S.Key.Name},
+		Colors={},Interface={MenuKey=UI.MenuKey.Name,WatermarkPosition=UI.WatermarkPosition,Discord=UI.Discord},Theme={}}
+	for _,key in ipairs(boolKeys) do data.State[key]=S[key] end
+	for key,value in pairs(S.Colors) do data.Colors[key]=colorHex(value) end
+	for _,key in ipairs(uiBoolKeys) do data.Interface[key]=UI[key] end
+	for key in pairs(uiNumberLimits) do data.Interface[key]=UI[key] end
+	for key,value in pairs(UI.Theme) do data.Theme[key]=colorHex(value) end
+	return data
+end
+local function keyboardKey(name)
+	if type(name)~="string" then return nil end
+	local ok,key=pcall(function()return Enum.KeyCode[name]end)
+	if not ok or not key or key==Enum.KeyCode.Unknown or key==Enum.KeyCode.Escape then return nil end
+	if key.Name:match("^Mouse") or key.Name:match("^Button") or key.Name:match("^Thumbstick")
+		or key.Name:match("^DPad") then return nil end
+	return key
+end
+local function decodeConfig(data)
+	assert(type(data)=="table" and data.Version==4,"Unsupported config version")
+	assert(type(data.State)=="table" and type(data.Interface)=="table"
+		and type(data.Colors)=="table" and type(data.Theme)=="table","Incomplete config")
+	local clean={State={},Interface={},Colors={},Theme={}}
+	for _,key in ipairs(boolKeys) do
+		assert(type(data.State[key])=="boolean","Invalid switch: "..key)
+		clean.State[key]=data.State[key]
+	end
+	for key,limits in pairs({FOV={20,600},Smooth={0,100}}) do
+		local value=data.State[key]
+		assert(type(value)=="number" and value==value and math.abs(value)<math.huge,"Invalid number")
+		clean.State[key]=math.clamp(math.round(value),limits[1],limits[2])
+	end
+	assert(data.State.Part=="Head" or data.State.Part=="Torso","Invalid target part")
+	assert(data.State.Center=="Crosshair" or data.State.Center=="Cursor","Invalid aim mode")
+	clean.State.Part,clean.State.Center=data.State.Part,data.State.Center
+	clean.State.Key=assert(keyboardKey(data.State.Key),"Invalid aimbot key")
+	clean.Interface.MenuKey=assert(keyboardKey(data.Interface.MenuKey),"Invalid menu key")
+	for key in pairs(S.Colors) do clean.Colors[key]=assert(parseColor(data.Colors[key]),"Invalid ESP color") end
+	for key in pairs(UI.Theme) do clean.Theme[key]=assert(parseColor(data.Theme[key]),"Invalid theme color") end
+	for _,key in ipairs(uiBoolKeys) do
+		assert(type(data.Interface[key])=="boolean","Invalid interface switch")
+		clean.Interface[key]=data.Interface[key]
+	end
+	for key,limits in pairs(uiNumberLimits) do
+		local value=data.Interface[key]
+		assert(type(value)=="number" and value==value and math.abs(value)<math.huge,"Invalid interface number")
+		clean.Interface[key]=math.clamp(value,limits[1],limits[2])
+	end
+	assert(table.find({"Top left","Top right","Custom"},data.Interface.WatermarkPosition),"Invalid watermark position")
+	clean.Interface.WatermarkPosition=data.Interface.WatermarkPosition
+	assert(type(data.Interface.Discord)=="string" and #data.Interface.Discord<=256,"Invalid Discord URL")
+	clean.Interface.Discord=data.Interface.Discord
+	return clean
+end
+local function sortedKeys(map)
+	local keys={}
+	for key in pairs(map) do if validName(key) then table.insert(keys,key) end end
+	table.sort(keys)
+	return keys
+end
+local function updateConfigList()
+	local keys=sortedKeys(configStore.Configs)
+	if not selectedConfig or not configStore.Configs[selectedConfig] then selectedConfig=keys[1] end
+	configSelect.Text=(selectedConfig or "none").."  >"
+	storageLabel.Text=persistent and "Storage: local JSON file" or "Storage: this session only"
+end
+local function writeStore()
+	if persistent then
+		local ok=pcall(function()writefile(configFile,Http:JSONEncode(configStore))end)
+		if not ok then persistent=false;note("File storage unavailable; kept in this session.") end
+	end
+	updateConfigList()
+end
+local function readStore()
+	if not persistent then updateConfigList();return end
+	if type(isfile)=="function" then
+		local ok,exists=pcall(isfile,configFile)
+		if ok and not exists then updateConfigList();return end
+	end
+	local ok,data=pcall(function()
+		local raw=readfile(configFile)
+		assert(type(raw)=="string" and #raw<=524288,"Config file too large")
+		return Http:JSONDecode(raw)
+	end)
+	if ok and type(data)=="table" and type(data.Configs)=="table" and type(data.Themes)=="table" then
+		local cleaned={Configs={},Themes={}}
+		for _,category in ipairs({"Configs","Themes"}) do
+			local count=0
+			for name,value in pairs(data[category]) do
+				if validName(name) and type(value)=="table" and count<50 then
+					cleaned[category][name]=value;count=count+1
+				end
+			end
+		end
+		configStore=cleaned
+	end
+	updateConfigList()
+end
+local function saveConfig(createOnly)
+	local name=configName.Text
+	if not validName(name) then note("Config name: letters, numbers, _ or -; max 32.");return end
+	if createOnly and configStore.Configs[name] then note("Config already exists; use Save.");return end
+	if not configStore.Configs[name] and #sortedKeys(configStore.Configs)>=50 then note("Maximum 50 configs.");return end
+	configStore.Configs[name]=snapshot();selectedConfig=name;writeStore()
+	note(persistent and "Config saved." or "Config saved for this session.")
+end
+on(configSelect.Activated,function()
+	local names=sortedKeys(configStore.Configs)
+	if #names==0 then return end
+	local index=table.find(names,selectedConfig) or 0
+	selectedConfig=names[index%#names+1]
+	configName.Text=selectedConfig;updateConfigList()
+end)
+on(settingsActions.Create.Activated,function()saveConfig(true)end)
+on(settingsActions.Save.Activated,function()saveConfig(false)end)
+on(settingsActions.Load.Activated,function()
+	local data=selectedConfig and configStore.Configs[selectedConfig]
+	if not data then note("Select a config first.");return end
+	local ok,clean=pcall(decodeConfig,data)
+	if not ok then note("Config rejected: "..tostring(clean));return end
+	stopAll()
+	for key,value in pairs(clean.State) do S[key]=value end
+	for key,value in pairs(clean.Interface) do UI[key]=value end
+	S.Colors=clean.Colors;UI.Theme=clean.Theme
+	S.Mode=nil;stickyTarget=nil;frameMotion=Vector2.zero;mouseIntent=Vector2.zero
+	binding=false;menuBinding=false;discordBox.Text=UI.Discord
+	applyTheme();refresh();syncMenuControls(true)
+	note("Config loaded; automation remains stopped.")
+end)
+on(settingsActions.Delete.Activated,function()
+	if not selectedConfig then return end
+	configStore.Configs[selectedConfig]=nil;selectedConfig=nil;writeStore();note("Config deleted.")
+end)
+on(settingsActions.Refresh.Activated,function()readStore();note("Config list refreshed.")end)
+
+local themeLibrary=group(pages.Settings,"Custom themes",276,678,258,136)
+local themeName=input(themeLibrary,"my_theme",9,14,239,20)
+local themeSelect=button(themeLibrary,"none  >",9,40,239,20)
+local function refreshThemes()
+	local names=sortedKeys(configStore.Themes)
+	if not selectedTheme or not configStore.Themes[selectedTheme] then selectedTheme=names[1] end
+	themeSelect.Text=(selectedTheme or "none").."  >"
+end
+on(themeSelect.Activated,function()
+	local names=sortedKeys(configStore.Themes)
+	if #names==0 then return end
+	local index=table.find(names,selectedTheme) or 0
+	selectedTheme=names[index%#names+1];themeName.Text=selectedTheme;refreshThemes()
+end)
+button(themeLibrary,"Save theme",9,68,116,20,function()
+	local name=themeName.Text
+	if not validName(name) then note("Theme name: letters, numbers, _ or -.");return end
+	if not configStore.Themes[name] and #sortedKeys(configStore.Themes)>=50 then note("Maximum 50 themes.");return end
+	configStore.Themes[name]=snapshot().Theme;selectedTheme=name;writeStore();refreshThemes();note("Theme saved.")
+end)
+button(themeLibrary,"Load theme",132,68,116,20,function()
+	local data=selectedTheme and configStore.Themes[selectedTheme]
+	if not data then return end
+	local colors={}
+	for key in pairs(UI.Theme) do
+		colors[key]=parseColor(data[key])
+		if not colors[key] then note("Invalid theme color.");return end
+	end
+	UI.Theme=colors;applyTheme();refresh();note("Theme loaded.")
+end)
+button(themeLibrary,"Delete theme",9,95,239,20,function()
+	if selectedTheme then configStore.Themes[selectedTheme]=nil;selectedTheme=nil;writeStore();refreshThemes() end
+end)
+on(settingsActions.Refresh.Activated,refreshThemes)
+readStore();refreshThemes()
+local function copyText(text)
+	if type(setclipboard)~="function" then note("Clipboard is unavailable in this environment.");return false end
+	local ok=pcall(setclipboard,text)
+	note(ok and "Copied to clipboard." or "Clipboard request failed.")
+	return ok
+end
+on(settingsActions.Copy.Activated,function()
+	copyText('loadstring(game:HttpGet("https://raw.githubusercontent.com/pruebashacks917-bot/combat-ui/refs/heads/main/CombatMonochrome.fixed.client.luau"))()')
+end)
+local function discordURL()
+	if UI.Discord:match("^https://discord%.gg/[%w%-]+$") or UI.Discord:match("^https://discord%.com/invite/[%w%-]+$") then return UI.Discord end
+	note("Enter your own https://discord.gg/ invite first.")
+	return nil
+end
+on(settingsActions.CopyDiscord.Activated,function()
+	local url=discordURL();if url then copyText(url) end
+end)
+on(settingsActions.JoinDiscord.Activated,function()
+	local url=discordURL();if not url then return end
+	local ok=pcall(function()GuiService:OpenBrowserWindow(url)end)
+	if not ok then copyText(url);note("Open the copied invite in your browser.") end
+end)
+on(settingsActions.Rejoin.Activated,function()
+	if game.JobId=="" then note("Rejoin is available in a live server.");return end
+	local ok=pcall(function()game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId,game.JobId,me)end)
+	if not ok then note("The game rejected the rejoin request.") end
+end)
+
+-- HUD and menu control have their own update path, even when all features are off.
+local hudClock,fpsClock,frames=0,0,0
+R:BindToRenderStep("SimpleCombatHUD",Enum.RenderPriority.Last.Value,function(dt)
+	if not alive then return end
+	syncMenuControls()
+	hudClock=hudClock+dt;fpsClock=fpsClock+dt;frames=frames+1
+	if hudClock>=.1 then refreshHUD();hudClock=0 end
+	if fpsClock>=.5 then
+		watermarkText.Text=string.format("Combat UI | v4.0 | %s | %d fps",me.Name,math.round(frames/fpsClock))
+		fpsClock,frames=0,0
+	end
+end)
+
 end
 
 local function updateESPCounts()
@@ -339,6 +699,13 @@ local function espRecord(p)
 	local container=new("Frame",{Name="ESP_"..p.UserId,Size=UDim2.fromScale(1,1),
 		BackgroundTransparency=1,Visible=false},overlay)
 	record={Container=container,Lines={}}
+	for _,key in ipairs({"Names","Health"}) do
+		record[key]=new("TextLabel",{AnchorPoint=Vector2.new(.5,1),
+			Size=UDim2.fromOffset(220,16),BackgroundTransparency=1,
+			Font=Enum.Font.Code,TextSize=12,TextStrokeColor3=Color3.new(0,0,0),
+			TextStrokeTransparency=.15,TextColor3=S.Colors[key],Visible=false,
+			TextTruncate=Enum.TextTruncate.AtEnd},container)
+	end
 	for i=1,#bonePairs+1 do
 		record.Lines[i]=new("Frame",{AnchorPoint=Vector2.new(.5,.5),
 			BorderSizePixel=0,Visible=false},container)
@@ -379,7 +746,7 @@ R:BindToRenderStep("SimpleCombatESP",Enum.RenderPriority.Camera.Value+2,function
 		record.Container.Visible=false
 		record.Highlight.Enabled=false
 	end
-	if not S.Enabled or not (S.Skeleton or S.Tracer or S.Chams) then return end
+	if not S.Enabled or not (S.Skeleton or S.Tracer or S.Chams or S.Names or S.Health) then return end
 	for _,p in ipairs(P:GetPlayers()) do
 		if enemy(p) then
 			local model=p.Character
@@ -394,6 +761,21 @@ R:BindToRenderStep("SimpleCombatESP",Enum.RenderPriority.Camera.Value+2,function
 			local canDraw=S.ThroughWalls or visible(camera.CFrame.Position,model)
 			if canDraw then
 				record.Container.Visible=true
+				record.Names.Visible=false
+				record.Health.Visible=false
+				local h=body(model)
+				local head=part(model,"Head") or root
+				local anchor=project(camera,head.Position+Vector3.new(0,head.Size.Y*.5+.7,0))
+				if anchor then
+					record.Names.Text=p.DisplayName==p.Name and p.Name or (p.DisplayName.." (@"..p.Name..")")
+					record.Names.TextColor3=S.Colors.Names
+					record.Names.Position=UDim2.fromOffset(anchor.X,anchor.Y-(S.Health and 17 or 0))
+					record.Names.Visible=S.Names
+					record.Health.Text=string.format("%d / %d HP",math.ceil(math.max(0,h.Health)),math.ceil(h.MaxHealth))
+					record.Health.TextColor3=S.Colors.Health
+					record.Health.Position=UDim2.fromOffset(anchor.X,anchor.Y)
+					record.Health.Visible=S.Health
+				end
 				for _,line in ipairs(record.Lines) do line.Visible=false end
 				if S.Skeleton then
 					for i,pair in ipairs(bonePairs) do
@@ -419,16 +801,16 @@ end)
 
 -- Movement
 
-local function stopBot()
+stopBot=function()
 	version=version+1
 	S.Mode,botTarget=nil,nil
 	local h=body(me.Character)
 	if h then h:Move(Vector3.zero) end
-	if driving and controls then pcall(function() controls:Enable() end) end
 	driving=false
+	syncMenuControls(true)
 	refresh()
 end
-local function stopAll()
+stopAll=function()
 	S.Enabled,target,stickyTarget=false,nil,nil
 	stopBot()
 	note("Detenido.")
@@ -572,12 +954,12 @@ local function toggleAim()
 	note(S.Aim and "Aimbot ON" or "Aimbot OFF")
 end
 on(activeCount.Activated,function()
-	binding=not binding
+	binding=not binding; menuBinding=false
 	refresh()
 	note(binding and "Pulsa la tecla que quieras. Escape cancela; mouse no permitido." or "Asignacion cancelada.")
 end)
-local dragHeader=new("Frame",{Position=UDim2.fromOffset(54,6),
-	Size=UDim2.fromOffset(190,50),BackgroundTransparency=1,Active=true,ZIndex=10},panel)
+local dragHeader=new("Frame",{Position=UDim2.fromOffset(7,3),
+	Size=UDim2.fromOffset(480,21),BackgroundTransparency=1,Active=true,ZIndex=10},panel)
 local dragInput,dragStart,dragPosition
 on(dragHeader.InputBegan,function(input)
 	if input.UserInputType==Enum.UserInputType.MouseButton1
@@ -622,16 +1004,23 @@ on(buttons.Center.Activated,function()
 end)
 on(kill.Activated,function() startBot("All") end)
 on(auto.Activated,function() startBot("Auto") end)
-local function togglePanel()
+togglePanel=function()
 	panel.Visible=not panel.Visible
 	open.Visible=not panel.Visible
+	syncMenuControls(true)
 end
 on(hide.Activated,togglePanel)
 on(open.Activated,togglePanel)
 on(close.Activated,function() gui:Destroy() end)
 on(U.InputBegan,function(input,processed)
 	if U:GetFocusedTextBox() then return end
-	if binding then
+	if menuBinding then
+        if input.UserInputType~=Enum.UserInputType.Keyboard then return end
+        if input.KeyCode==Enum.KeyCode.Escape then menuBinding=false
+        elseif input.KeyCode~=Enum.KeyCode.Unknown then UI.MenuKey=input.KeyCode;menuBinding=false end
+        refresh();return
+    end
+    if binding then
 		if input.UserInputType~=Enum.UserInputType.Keyboard then return end
 		if input.KeyCode==Enum.KeyCode.Escape then
 			binding=false; note("Asignacion cancelada.")
@@ -649,13 +1038,16 @@ on(U.InputBegan,function(input,processed)
 	end
 	if processed then return end
 	if input.KeyCode==Enum.KeyCode.Backspace then stopAll()
-	elseif input.KeyCode==Enum.KeyCode.RightShift then togglePanel() end
+	elseif input.KeyCode==UI.MenuKey then togglePanel() end
 end)
 on(U.InputChanged,function(input)
 	if input.UserInputType==Enum.UserInputType.MouseMovement
-		and not binding and not dragInput and not U:GetFocusedTextBox()
+		and not binding and not menuBinding and not dragInput and not U:GetFocusedTextBox()
 		and not GuiService.MenuIsOpen then
-		frameMotion=frameMotion+Vector2.new(input.Delta.X,input.Delta.Y)
+		local delta=Vector2.new(input.Delta.X,input.Delta.Y)
+		if os.clock()<injectionExpires and (delta-injectedMotion).Magnitude<=2 then
+			injectedMotion=Vector2.zero
+		else frameMotion=frameMotion+delta end
 	end
 end)
 
@@ -763,13 +1155,40 @@ local function aimAlpha(smooth,instant,manual,dt)
 	return alpha
 end
 
+-- Mouse output never writes Camera.CFrame.
+local function applyMouseAim(camera,point,alpha)
+	if U.MouseBehavior~=Enum.MouseBehavior.Default
+		or U:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
+		or U:IsMouseButtonPressed(Enum.UserInputType.MouseButton3) then
+		return "Mouse bloqueado por el juego; necesita cursor libre."
+	end
+	if type(mousemoverel)~="function" then
+		return "Este entorno no permite mover el cursor."
+	end
+	local screen,onScreen=camera:WorldToViewportPoint(point.Position)
+	if not onScreen or screen.Z<=0 then return nil end
+	local delta=(Vector2.new(screen.X,screen.Y)-U:GetMouseLocation())*alpha
+	local dx,dy=math.round(delta.X),math.round(delta.Y)
+	if dx==0 and dy==0 then return nil end
+	injectedMotion=Vector2.new(dx,dy)
+	injectionExpires=os.clock()+.08
+	local ok=pcall(mousemoverel,dx,dy)
+	if not ok then injectedMotion=Vector2.zero; return "El entorno rechazo el movimiento del mouse." end
+	return nil
+end
+
 -- Aimbot: immediate acquisition with mouse-intent retargeting.
 R:BindToRenderStep("SimpleCombatAim",Enum.RenderPriority.Camera.Value+1,function(dt)
 	local camera=workspace.CurrentCamera
 	if not alive or not camera then return end
 	scale.Scale=math.max(.3,math.min(1,
-		(camera.ViewportSize.Y-70)/428,(camera.ViewportSize.X-40)/430))
-	local currentMotion=frameMotion
+		(camera.ViewportSize.Y-70)/620,(camera.ViewportSize.X-40)/560))
+	if not UI.Placed then
+        local width=560*scale.Scale
+        panel.Position=UDim2.new(0,math.clamp((camera.ViewportSize.X-width)*.5+100,10,math.max(10,camera.ViewportSize.X-width-10)),.5,0)
+        UI.Placed=true
+    end
+    local currentMotion=frameMotion
 	frameMotion=Vector2.zero
 	mouseIntent=mouseIntent+currentMotion
 	local manualMove=not S.Sticky and currentMotion.Magnitude>.15
@@ -782,21 +1201,26 @@ R:BindToRenderStep("SimpleCombatAim",Enum.RenderPriority.Camera.Value+1,function
 	local selected=nil
 	target=nil
 	if S.Enabled and (S.Aim or S.Mode~=nil) and body(me.Character)
-		and not binding and not dragInput and not GuiService.MenuIsOpen and not U:GetFocusedTextBox() then
+		and not binding and not menuBinding and not dragInput and not GuiService.MenuIsOpen and not U:GetFocusedTextBox() then
 		target,selected=pickClosest(camera,center,intentSwitch)
 	else stickyTarget=nil; mouseIntent=Vector2.zero
 	end
-	 if selected and (selected.Position-camera.CFrame.Position).Magnitude>.01 then
-		local ray=camera:ViewportPointToRay(center.X,center.Y)
-		local localRay=camera.CFrame:VectorToObjectSpace(ray.Direction)
-		local correction=CFrame.lookAt(Vector3.zero,localRay):Inverse()
-		local goal=CFrame.lookAt(camera.CFrame.Position,selected.Position)*correction
+	 local aimIssue=nil
+	if selected and (selected.Position-camera.CFrame.Position).Magnitude>.01 then
 		local alpha=aimAlpha(S.Smooth,S.Lock,manualMove,dt)
-
-		camera.CFrame=camera.CFrame:Lerp(goal,alpha)
+		if S.Center=="Cursor" then
+			aimIssue=applyMouseAim(camera,selected,alpha)
+		else
+			local ray=camera:ViewportPointToRay(center.X,center.Y)
+			local localRay=camera.CFrame:VectorToObjectSpace(ray.Direction)
+			local correction=CFrame.lookAt(Vector3.zero,localRay):Inverse()
+			local goal=CFrame.lookAt(camera.CFrame.Position,selected.Position)*correction
+			camera.CFrame=camera.CFrame:Lerp(goal,alpha)
+		end
 	end
-	stroke.Color=target and Color3.fromRGB(250,250,248) or blue
+	 stroke.Color=target and UI.Theme.Accent or UI.Theme.Muted
 	if os.clock()<messageUntil then status.Text=message
+	elseif aimIssue then status.Text=aimIssue
 	elseif not S.Enabled then status.Text="Desactivado"
 	elseif target and not selected then status.Text=S.Part.." oculto: "..target.Name
 	elseif target then status.Text="Objetivo: "..target.Name.." | "..S.Part
@@ -811,6 +1235,7 @@ on(gui.Destroying,function()
 	stopBot()
 	R:UnbindFromRenderStep("SimpleCombatAim")
 	R:UnbindFromRenderStep("SimpleCombatESP")
+	R:UnbindFromRenderStep("SimpleCombatHUD")
 	espWorld:Destroy()
 	for _,c in ipairs(links) do c:Disconnect() end
 	overlay:Destroy()
