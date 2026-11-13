@@ -19,6 +19,7 @@ local S = {Enabled=false, Aim=false, Lock=false, FOV=200, Smooth=0,
  ThroughWalls=true, Colors={Skeleton=Color3.new(1,1,1),Tracer=Color3.new(1,1,1),Chams=Color3.new(1,1,1),Names=Color3.new(1,1,1),Health=Color3.fromRGB(100,255,150)}}
 S.Activation="Toggle"
 local heldAim=false
+S.Noclip=false
 local binding=false
 local stickyTarget=nil
 local frameMotion,mouseIntent=Vector2.zero,Vector2.zero
@@ -162,7 +163,7 @@ panel.AnchorPoint=Vector2.new(0,.5)
 panel.Position=UDim2.new(0,24,.5,0)
 outline(panel)
 local scale=new("UIScale",{},panel)
-local title=label(panel,"Combat UI | PRISON-7",9,4,410,19,12)
+local title=label(panel,"kurnio.wtf | review-1",9,4,410,19,12)
 rect(panel,7,27,546,2,"Accent")
 local function button(parent,text,x,y,w,h,fn)
 	local b=theme(new("TextButton",{Text=text,Position=UDim2.fromOffset(x,y),
@@ -174,7 +175,7 @@ local function button(parent,text,x,y,w,h,fn)
 end
 local hide=button(panel,"_",502,5,21,17)
 local close=button(panel,"X",529,5,21,17)
-local open=button(gui,"Combat UI [+]",18,100,116,23)
+local open=button(gui,"kurnio.wtf [+]",18,100,116,23)
 open.Visible=false
 local function input(parent,text,x,y,w,h,changed)
 	local box=theme(new("TextBox",{Text=text,Position=UDim2.fromOffset(x,y),
@@ -302,14 +303,14 @@ local function applyTheme()
 	panel.BackgroundTransparency=UI.MenuAlpha
 end
 
-for i,name in ipairs({"Aimbot","ESP","Rage Bot","Settings","Armas"}) do
+for i,name in ipairs({"Aimbot","ESP","Rage Bot","Armas","Jugador","Settings"}) do
 	local page=new("ScrollingFrame",{Name=name,Position=UDim2.fromOffset(9,62),
 		Size=UDim2.fromOffset(542,510),BackgroundTransparency=1,BorderSizePixel=0,
 		ScrollBarThickness=3,CanvasSize=UDim2.fromOffset(0,name=="Settings" and 824 or name=="Rage Bot" and 1540 or 510),
 		ScrollingDirection=Enum.ScrollingDirection.Y,Visible=name==UI.Tab},panel)
 	theme(page,"ScrollBarImageColor3","Accent")
 	pages[name]=page
-	local tab=button(panel,name,9+(i-1)*92,35,86,21,function()
+	local tab=button(panel,name,9+(i-1)*88,35,83,21,function()
 		UI.Tab=name
 		for key,p in pairs(pages) do p.Visible=key==name end
 		refresh()
@@ -425,11 +426,11 @@ local rageConfig=new("Folder",{Name="RageSettings"},gui)
 local rageDefaults={Enabled=false,Aimbot=true,SilentAim=false,AutoShoot=false,AutoWall=false,
  Wallbang=false,Prediction=false,PredictionTime=0,NoRecoil=true,NoSpread=false,HitChance=0,
  FOV=200,Selection="Manual",TargetKey="Sin asignar",RageKey="Sin asignar",SelectedUserId=0,Hitbox="Head",VisibilityCheck=true,AutoSwitch=true,
- RapidFire=false,Aim360=false,TeamCheck=true,TeleportTarget=true,Visualize=true,Strafe=false,StrafeRadius=5,StrafeSpeed=90,ClosestPart=false,IgnoreProtected=false,
+ RapidFire=false,Aim360=false,TeamCheck=true,TeleportTarget=true,Visualize=true,Strafe=false,StrafeRadius=5,StrafeSpeed=720,ClosestPart=false,IgnoreProtected=false,
  LimitDistance=false,MaxDistance=800,ReactionTime=0,ForgetTime=1,FullAuto=false,FireRatePercent=100,
  NotifyHit=true,NotifyDuration=2,NotifyText="Hit {NAME} for {DMG} in {PART} ({WEAPON})"}
 for key,value in pairs(rageDefaults) do rageConfig:SetAttribute(key,value) end
-local rageLeft=group(pages["Rage Bot"],"Private weapon",4,435,258,350)
+local rageLeft=group(pages["Rage Bot"],"Rage controls",4,435,258,350)
 local rageRight=group(pages["Rage Bot"],"Targeting",276,435,258,475)
 local rageFlags={{"Enabled","Rage Bot enabled"},{"Aimbot","Aimbot"},{"SilentAim","Silent Aim"},
  {"AutoShoot","Auto Shoot"},{"AutoWall","Auto Wall"},{"Wallbang","Wallbang"},
@@ -441,6 +442,10 @@ for i,entry in ipairs(rageFlags) do
  check(rageLeft,text,8,12+(i-1)*23,240,function()return rageConfig:GetAttribute(key)end,
   function(value)
    rageConfig:SetAttribute(key,value)
+   if key=="Aim360" and value then
+    rageConfig:SetAttribute("Selection","Crosshair")
+    note("360 Aim: seleccion automatica alrededor del personaje.")
+   end
    if key=="Enabled" and value then S.Aim=false;heldAim=false;target=nil;stickyTarget=nil;if stopBot then stopBot() end end
   end)
 end
@@ -456,8 +461,46 @@ number(rageRight,"Prediction time (s)",9,210,239,function()return rageConfig:Get
  function(v)rageConfig:SetAttribute("PredictionTime",v)end,0,.25)
 local rageBinding=false
 local targetBinding=false
-local targetControls=group(pages["Rage Bot"],"OBJETIVO",4,13,530,200)
 local rageGhost=nil
+local noclipParts=setmetatable({},{__mode="k"})
+local function restoreNoclip()
+ for item,original in pairs(noclipParts) do
+  if item.Parent then pcall(function()item.CanCollide=original end) end
+  noclipParts[item]=nil
+ end
+end
+local function applyNoclip(character)
+ if not character then return end
+ for _,item in ipairs(character:GetDescendants()) do
+  if item:IsA("BasePart") then
+   if noclipParts[item]==nil then noclipParts[item]=item.CanCollide end
+   item.CanCollide=false
+  end
+ end
+end
+local movementGroup=group(pages.Jugador,"Movimiento",4,13,530,160)
+check(movementGroup,"Noclip",8,17,510,function()return S.Noclip end,function(value)
+ S.Noclip=value
+ if not value then restoreNoclip() end
+end)
+label(movementGroup,"Afecta al personaje y a la copia local activa.",9,56,508,22,12,"Muted")
+label(movementGroup,"STOP ALL / Escape restaura las colisiones originales.",9,84,508,22,12,"Muted")
+label(movementGroup,"No modifica velocidad, gravedad ni la opcion de vuelo.",9,112,508,22,12,"Muted")
+on(R.Stepped,function()
+ if not alive or not S.Noclip then return end
+ for item,original in pairs(noclipParts) do
+  if not item.Parent then noclipParts[item]=nil
+  elseif not (me.Character and item:IsDescendantOf(me.Character)) and not (rageGhost and item:IsDescendantOf(rageGhost)) then
+   pcall(function()item.CanCollide=original end);noclipParts[item]=nil
+  end
+ end
+ applyNoclip(me.Character)
+ applyNoclip(rageGhost)
+end)
+on(me.CharacterRemoving,restoreNoclip)
+on(gui.Destroying,function()S.Noclip=false;restoreNoclip()end)
+
+local targetControls=group(pages["Rage Bot"],"OBJETIVO",4,13,530,200)
 local observing=false
 local observedCamera,previousSubject
 local selectKeyButton=button(targetControls,"Target Selection [Sin asignar] - cambiar tecla",9,16,508,25,function()
@@ -554,32 +597,119 @@ label(rageRight,"Copia local: WASD + Espacio.",9,334,239,30,11,"Muted")
 do
  local gunGroup=group(pages.Armas,"Conseguir armas",4,13,530,215)
  local busy=false
- local weaponStatus=label(gunGroup,"Pide el arma sin mover tu personaje.",9,162,508,36,12,"Muted")
+ local weaponStatus=label(gunGroup,"Recoge cerca del arma, equipa y regresa a tu posicion.",9,162,508,36,12,"Muted")
  weaponStatus.TextWrapped=true
+ local cancelPickup=nil
+ on(gui.Destroying,function()if cancelPickup then cancelPickup() end end)
  local function requestGun(name)
   if busy then return end
+  local function inventory()
+   local bag=me:FindFirstChildOfClass("Backpack")
+   return (me.Character and me.Character:FindFirstChild(name)) or (bag and bag:FindFirstChild(name))
+  end
+  local hum,root=body(me.Character)
+  if not root then weaponStatus.Text="Necesitas un personaje vivo.";return end
+  local existing=inventory()
+  if existing and existing:IsA("Tool") then hum:EquipTool(existing);weaponStatus.Text=name.." equipada.";return end
   local items=workspace:FindFirstChild("Prison_ITEMS")
-  local giver=items and items:FindFirstChild("giver")
-  local model=giver and giver:FindFirstChild(name)
-  local pickup=model and model:FindFirstChild("ITEMPICKUP")
+  local model=items and items:FindFirstChild(name,true)
+  local pickup=model and model:FindFirstChild("ITEMPICKUP",true)
   local folder=workspace:FindFirstChild("Remote")
   local remote=folder and folder:FindFirstChild("ItemHandler")
-  if not pickup or not remote or not remote:IsA("RemoteFunction") then weaponStatus.Text="No se encontro ItemHandler o el pickup de "..name;return end
-  busy=true;weaponStatus.Text="Solicitando "..name.."..."
-  local finished=false
-  local function check()
-   if finished then return end;finished=true;busy=false
-   local bag=me:FindFirstChildOfClass("Backpack")
-   local weapon=(bag and bag:FindFirstChild(name)) or (me.Character and me.Character:FindFirstChild(name))
-   weaponStatus.Text=weapon and (name.." en tu inventario. Tu posicion no cambio.") or "El servidor no entrego el arma. Tu posicion no cambio."
+  if not pickup then weaponStatus.Text="Pickup no encontrado: "..name..". Puede no estar cargado.";return end
+  if not remote or not (remote:IsA("RemoteFunction") or remote:IsA("RemoteEvent")) then
+   weaponStatus.Text="ItemHandler no encontrado o tipo incompatible.";return
   end
-  task.delay(4,check)
-  task.spawn(function()pcall(function()remote:InvokeServer(pickup)end);task.wait(.5);if alive then check() end end)
+  local position=pickup:IsA("BasePart") and pickup.CFrame or model:IsA("Model") and model:GetPivot()
+  if not position then weaponStatus.Text="Pickup sin posicion utilizable.";return end
+  local character=me.Character
+  local proxyRoot=rageGhost and rageGhost:FindFirstChild("HumanoidRootPart")
+  local returnTo=proxyRoot and proxyRoot.CFrame or root.CFrame
+  busy=true
+  rageConfig:SetAttribute("Enabled",false);endObserve()
+  local finished=false
+  local lastError=nil
+  local function finish()
+   if finished then return end;finished=true;busy=false;cancelPickup=nil
+   if me.Character==character and root.Parent then
+    root.CFrame=returnTo;root.AssemblyLinearVelocity=Vector3.zero;root.AssemblyAngularVelocity=Vector3.zero
+    local weapon=inventory()
+    if weapon and weapon:IsA("Tool") and hum.Health>0 then pcall(function()hum:EquipTool(weapon)end) end
+   end
+   if alive and weaponStatus.Parent then
+    weaponStatus.Text=inventory() and (name.." recibida. Posicion restaurada.")
+     or (lastError and "Error de ItemHandler; posicion restaurada." or "El servidor no entrego el arma; posicion restaurada.")
+   end
+  end
+  cancelPickup=finish
+  task.delay(6,finish)
+  weaponStatus.Text="Acercandose al pickup de "..name.."..."
+  task.defer(function()
+   if finished or not alive or me.Character~=character then finish();return end
+   root.CFrame=position*CFrame.new(0,3,0)
+   root.AssemblyLinearVelocity=Vector3.zero
+   task.wait(.4)
+   if finished or not alive or me.Character~=character then finish();return end
+   local requestDone=false
+   task.spawn(function()
+    local ok,err=pcall(function()
+     if remote:IsA("RemoteFunction") then remote:InvokeServer(pickup) else remote:FireServer(pickup) end
+    end)
+    if not ok then lastError=tostring(err) end
+    -- Alternative ItemHandler shape evidenced by rossburns38/Scripts.
+    -- Bounded fallback only after the pickup request returned without an item.
+    task.wait(.6)
+    if not finished and alive and me.Character==character and not inventory() then
+     local alternate={Parent=model,Position=root.Position}
+     local success,failure=pcall(function()
+      if remote:IsA("RemoteFunction") then remote:InvokeServer(alternate) else remote:FireServer(alternate) end
+     end)
+     if not success then lastError=tostring(failure) else lastError=nil end
+    end
+    requestDone=true
+   end)
+   local deadline=os.clock()+4
+   repeat
+    task.wait(.1)
+    if inventory() then break end
+    if requestDone and lastError then break end
+   until finished or not alive or me.Character~=character or os.clock()>=deadline
+   finish()
+  end)
  end
  for i,name in ipairs({"M9","Remington 870","AK-47"}) do
   button(gunGroup,"Conseguir "..name,9,18+(i-1)*43,508,31,function()requestGun(name)end)
  end
 end
+do
+ local diagnostics=group(pages.Armas,"Diagnostico real del cliente",4,250,530,245)
+ local reportBox=input(diagnostics,"Pulsa Comprobar para leer la estructura del juego.",9,48,508,183)
+ reportBox.MultiLine=true;reportBox.TextSize=11;reportBox.TextYAlignment=Enum.TextYAlignment.Top
+ local function report()
+  local rs=game:GetService("ReplicatedStorage")
+  local remotes=rs:FindFirstChild("GunRemotes")
+  local worldRemote=workspace:FindFirstChild("Remote")
+  local tool=me.Character and me.Character:FindFirstChildOfClass("Tool")
+  local function describe(item)return item and (item:GetFullName().." ["..item.ClassName.."]") or "NO ENCONTRADO" end
+  local lines={"kurnio.wtf review-1 / PlaceId "..game.PlaceId,
+   "Arma: "..describe(tool),"GunStates: "..describe(tool and tool:FindFirstChild("GunStates")),
+   "Shoot nuevo: "..describe(remotes and remotes:FindFirstChild("ShootEvent")),
+   "Shoot antiguo: "..describe(rs:FindFirstChild("ShootEvent")),
+   "ItemHandler: "..describe(worldRemote and worldRemote:FindFirstChild("ItemHandler")),
+   "hookfunction="..type(hookfunction).." filtergc="..type(filtergc).." getgc="..type(getgc),
+   "Rage="..tostring(rageConfig:GetAttribute("Enabled")).." AutoShoot="..tostring(rageConfig:GetAttribute("AutoShoot")),
+   "Selection="..tostring(rageConfig:GetAttribute("Selection")).." Target="..tostring(rageConfig:GetAttribute("SelectedUserId"))}
+  if tool then for _,key in ipairs({"ToolType","FireRate","Spread","AutoFire","CurrentAmmo","Local_CurrentAmmo"}) do table.insert(lines,key.."="..tostring(tool:GetAttribute(key))) end end
+  reportBox.Text=table.concat(lines,"\n")
+ end
+ button(diagnostics,"Comprobar",9,14,247,25,report)
+ button(diagnostics,"Copiar diagnostico",270,14,247,25,function()
+  report()
+  if type(setclipboard)=="function" then local ok=pcall(setclipboard,reportBox.Text);note(ok and "Diagnostico copiado." or "No se pudo copiar.")
+  else note("Selecciona el texto del diagnostico y copialo.") end
+ end)
+end
+
 -- Local controllable proxy. The server still sees the original character at the target.
 do
  local sourceCharacter=nil
@@ -619,6 +749,12 @@ do
   for _,item in ipairs(clone:GetDescendants()) do
    if item:IsA("BasePart") then
     item.Anchored=false;item.CanTouch=false;item.CanQuery=false
+    -- Clone the pre-noclip collision state, not the temporary overridden value.
+    local names={};local cursor=item
+    while cursor and cursor~=clone do table.insert(names,1,cursor.Name);cursor=cursor.Parent end
+    local original=character
+    for _,name in ipairs(names) do original=original and original:FindFirstChild(name) end
+    if original and noclipParts[original]~=nil then item.CanCollide=noclipParts[original] end
     item.AssemblyLinearVelocity=Vector3.zero;item.AssemblyAngularVelocity=Vector3.zero
     item.Transparency=math.max(item.Transparency,.2)
    elseif item:IsA("Motor6D") and (item.Name:find("Hip") or item.Name:find("Shoulder")) then
@@ -658,7 +794,7 @@ do
     local offset=root.Position-otherRoot.Position
     orbitAngle=math.atan2(offset.Z,offset.X);orbitTarget=p
    end
-   orbitAngle=(orbitAngle+math.rad(rageConfig:GetAttribute("StrafeSpeed") or 90)*dt)%(math.pi*2)
+   orbitAngle=(orbitAngle+math.rad(rageConfig:GetAttribute("StrafeSpeed") or 720)*dt)%(math.pi*2)
    if now>=nextTeleport then
     nextTeleport=now
     local radius=math.clamp(rageConfig:GetAttribute("StrafeRadius") or 5,3,20)
@@ -673,7 +809,7 @@ do
     if not wall and floor and floor.Normal.Y>.6 then
      position=Vector3.new(position.X,floor.Position.Y+own.HipHeight+root.Size.Y*.5,position.Z)
      local desired=CFrame.lookAt(position,Vector3.new(otherRoot.Position.X,position.Y,otherRoot.Position.Z))
-     root.CFrame=root.CFrame:Lerp(desired,1-math.exp(-dt*18))
+     root.CFrame=desired -- Continuous orbit phase; no smoothing lag that shrinks fast orbits.
      root.AssemblyLinearVelocity=Vector3.zero;root.AssemblyAngularVelocity=Vector3.zero
     end
    end
@@ -718,7 +854,7 @@ end
 local orbitGroup=group(pages["Rage Bot"],"Strafe / Fake Position",4,1325,530,190)
 check(orbitGroup,"Strafe: orbitar al objetivo",8,14,510,function()return rageConfig:GetAttribute("Strafe")end,function(v)rageConfig:SetAttribute("Strafe",v)end)
 number(orbitGroup,"Distancia (studs)",9,48,505,function()return rageConfig:GetAttribute("StrafeRadius")end,function(v)rageConfig:SetAttribute("StrafeRadius",v)end,3,20)
-number(orbitGroup,"Velocidad (grados/s)",9,92,505,function()return rageConfig:GetAttribute("StrafeSpeed")end,function(v)rageConfig:SetAttribute("StrafeSpeed",v)end,15,360)
+number(orbitGroup,"Velocidad (grados/s)",9,92,505,function()return rageConfig:GetAttribute("StrafeSpeed")end,function(v)rageConfig:SetAttribute("StrafeSpeed",v)end,30,2160)
 label(orbitGroup,"Fake Position es una copia LOCAL; no altera la posicion del servidor.",9,135,505,40,11,"Muted")
 local advanced=group(pages["Rage Bot"],"Targeting avanzado",4,940,258,350)
 local weaponOptions=group(pages["Rage Bot"],"Arma / impactos",276,940,258,350)
@@ -855,7 +991,7 @@ settingsActions.Refresh=button(configGroup,"Refresh list",9,158,239,20)
 local storageLabel=label(configGroup,"Session storage",9,193,239,17,11,"Muted")
 
 local credits=group(pages.Settings,"Credits",276,552,258,104)
-label(credits,"Combat UI - custom build",9,15,239,18)
+label(credits,"kurnio.wtf - custom build",9,15,239,18)
 label(credits,"UI inspired by your references.",9,40,239,18,11,"Muted")
 label(credits,"v4.1 / client-side interface",9,68,239,18,11,"Muted")
 local help=group(pages.Settings,"Controls",4,630,258,146)
@@ -874,10 +1010,11 @@ activeLabel.TextYAlignment=Enum.TextYAlignment.Top
 activeLabel.TextTruncate=Enum.TextTruncate.None
 local watermark=rect(gui,8,8,365,23,"Background")
 outline(watermark);rect(watermark,0,0,365,1,"Accent")
-local watermarkText=label(watermark,"Combat UI | PRISON-7",6,3,353,18,11)
+local watermarkText=label(watermark,"kurnio.wtf | review-1",6,3,353,18,11)
 
 local function activeRows()
 	local rows={}
+	if S.Noclip then table.insert(rows,"[-] Noclip") end
 	if rageConfig:GetAttribute("Enabled") then table.insert(rows,"[-] Rage Bot") end
 	if S.Enabled then
 		if S.Aim or S.Mode then
@@ -1148,7 +1285,7 @@ R:BindToRenderStep("SimpleCombatHUD",Enum.RenderPriority.Last.Value,function(dt)
 	hudClock=hudClock+dt;fpsClock=fpsClock+dt;frames=frames+1
 	if hudClock>=.1 then refreshHUD();hudClock=0 end
 	if fpsClock>=.5 then
-		watermarkText.Text=string.format("Combat UI | PRISON-7 | %s | %d fps",me.Name,math.round(frames/fpsClock))
+		watermarkText.Text=string.format("kurnio.wtf | review-1 | %s | %d fps",me.Name,math.round(frames/fpsClock))
 		fpsClock,frames=0,0
 	end
 end)
@@ -1299,6 +1436,7 @@ stopBot=function()
 	refresh()
 end
 stopAll=function()
+	S.Noclip=false;restoreNoclip()
 	rageConfig:SetAttribute("Enabled",false)
 	endObserve()
 	S.Enabled,target,stickyTarget=false,nil,nil
