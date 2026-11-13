@@ -14,7 +14,9 @@ local old = pg:FindFirstChild("SimpleCombatUI")
 if old then old:Destroy() end
 
 local S = {Enabled=false, Aim=false, Lock=false, FOV=200, Smooth=20,
-	Part="Head", Center="Crosshair", Mode=nil}
+	Part="Head", Center="Crosshair", Mode=nil, Key=Enum.KeyCode.Q, Sticky=false}
+local binding=false
+local stickyTarget=nil
 local alive, version, target, botTarget = true, 0, nil, nil
 local controls, driving, refresh = nil, false, nil
 local links, message, messageUntil = {}, "", 0
@@ -112,9 +114,9 @@ badge.Active=false
 badge.AutoButtonColor=false
 txt(panel,"COMBAT",60,12,140,27,22,ink,Enum.Font.GothamBlack)
 txt(panel,"CONTROL PANEL",61,39,150,12,9,gray)
-local activeCount=smallButton("0 / 5 ON",254,20,90,26)
-activeCount.Active=false
-activeCount.AutoButtonColor=false
+local activeCount=smallButton("KEY: Q",254,20,90,26)
+activeCount.Active=true
+activeCount.AutoButtonColor=true
 local hide=smallButton("-",354,20,26,26)
 local close=smallButton("X",387,20,26,26)
 local open=smallButton("COMBAT  +",18,100,116,34,gui)
@@ -174,7 +176,8 @@ local function choice(key,title,x,y,value)
 end
 local partValue=choice("Part","AIM PART",220,205,S.Part)
 local centerValue=choice("Center","AIM CENTER",16,259,S.Center)
-local emergency=smallButton("STOP ALL",220,259,194,46)
+local sticky=card("Sticky","Sticky","Keep current target",220,259)
+local emergency=smallButton("STOP ALL",334,370,80,22)
 local function number(key,title,x,y,minimum,maximum,suffix)
 	local holder=new("Frame",{Position=UDim2.fromOffset(x,y),
 		Size=UDim2.fromOffset(194,43),BackgroundColor3=Color3.fromRGB(232,232,228),
@@ -196,10 +199,10 @@ local function number(key,title,x,y,minimum,maximum,suffix)
 end
 number("FOV","FOV",16,316,20,600,"Radius / pixels")
 number("Smooth","SMOOTHNESS",220,316,0,100,"0 instant - 100 slow")
-local status=txt(panel,"Ready",17,370,396,20,11,ink)
+local status=txt(panel,"Ready",17,370,307,20,11,ink)
 new("Frame",{Position=UDim2.fromOffset(16,399),Size=UDim2.fromOffset(398,1),
 	BackgroundColor3=Color3.fromRGB(205,205,200),BorderSizePixel=0},panel)
-txt(panel,"BACKSPACE  Stop     /     RIGHT SHIFT  Menu",17,405,396,15,9,gray)
+txt(panel,"Drag COMBAT to move / Right Shift: menu / Backspace: stop",17,405,396,15,9,gray)
 
 refresh=function()
 	local count=0
@@ -220,7 +223,7 @@ refresh=function()
 	end
 	partValue.Text=S.Part
 	centerValue.Text=S.Center
-	activeCount.Text=tostring(count).." / 5 ON"
+	activeCount.Text=binding and "PRESS A-Z" or ("KEY: "..S.Key.Name)
 end
 
 -- Movement
@@ -235,7 +238,7 @@ local function stopBot()
 	refresh()
 end
 local function stopAll()
-	S.Enabled,target=false,nil
+	S.Enabled,target,stickyTarget=false,nil,nil
 	stopBot()
 	note("Detenido.")
 end
@@ -368,18 +371,56 @@ local function startBot(mode)
 	end)
 end
 
+-- Keyboard binding and draggable header.
+local function toggleAim()
+	local effective=S.Enabled and (S.Aim or S.Mode~=nil)
+	S.Aim=not effective
+	if S.Aim then S.Enabled=true else target=nil; stopBot() end
+	refresh()
+	note(S.Aim and "Aimbot ON" or "Aimbot OFF")
+end
+on(activeCount.Activated,function()
+	binding=not binding
+	refresh()
+	note(binding and "Pulsa una letra A-Z. Escape cancela." or "Asignacion cancelada.")
+end)
+local dragHeader=new("Frame",{Position=UDim2.fromOffset(54,6),
+	Size=UDim2.fromOffset(190,50),BackgroundTransparency=1,Active=true,ZIndex=10},panel)
+local dragInput,dragStart,dragPosition
+on(dragHeader.InputBegan,function(input)
+	if input.UserInputType==Enum.UserInputType.MouseButton1
+		or input.UserInputType==Enum.UserInputType.Touch then
+		dragInput,dragStart,dragPosition=input,input.Position,panel.Position
+	end
+end)
+on(U.InputChanged,function(input)
+	if not dragInput then return end
+	local mouse=dragInput.UserInputType==Enum.UserInputType.MouseButton1
+	if input~=dragInput and not (mouse and input.UserInputType==Enum.UserInputType.MouseMovement) then return end
+	local delta=input.Position-dragStart
+	local area=gui.AbsoluteSize
+	local size=panel.AbsoluteSize
+	local x=dragPosition.X.Scale*area.X+dragPosition.X.Offset+delta.X
+	local y=dragPosition.Y.Scale*area.Y+dragPosition.Y.Offset+delta.Y
+	x=math.clamp(x,6,math.max(6,area.X-size.X-6))
+	y=math.clamp(y,size.Y*.5+6,math.max(size.Y*.5+6,area.Y-size.Y*.5-6))
+	panel.Position=UDim2.fromOffset(x,y)
+end)
+on(U.InputEnded,function(input)
+	if input==dragInput or (dragInput and
+		dragInput.UserInputType==Enum.UserInputType.MouseButton1 and
+		input.UserInputType==Enum.UserInputType.MouseButton1) then dragInput=nil end
+end)
+
 -- Buttons
 on(emergency.Activated,stopAll)
+on(sticky.Activated,function() S.Sticky=not S.Sticky; stickyTarget=nil; refresh() end)
 on(buttons.Enabled.Activated,function()
 	S.Enabled=not S.Enabled
-	if not S.Enabled then target=nil; stopBot() end
+	if not S.Enabled then target=nil; stickyTarget=nil; stopBot() end
 	refresh()
 end)
-on(buttons.Aim.Activated,function()
-	S.Aim=not S.Aim
-	if S.Aim then S.Enabled=true end
-	refresh()
-end)
+on(buttons.Aim.Activated,toggleAim)
 on(buttons.Lock.Activated,function() S.Lock=not S.Lock; refresh() end)
 on(buttons.Part.Activated,function()
 	S.Part=S.Part=="Head" and "Torso" or "Head"; refresh()
@@ -397,69 +438,114 @@ on(hide.Activated,togglePanel)
 on(open.Activated,togglePanel)
 on(close.Activated,function() gui:Destroy() end)
 on(U.InputBegan,function(input,processed)
-	if processed or U:GetFocusedTextBox() then return end
+	if U:GetFocusedTextBox() or GuiService.MenuIsOpen then return end
+	if binding then
+		-- Mouse buttons can never become the aimbot binding.
+		if input.UserInputType~=Enum.UserInputType.Keyboard then return end
+		if input.KeyCode==Enum.KeyCode.Escape then
+			binding=false
+			note("Asignacion cancelada.")
+		elseif input.KeyCode.Name:match("^[A-Z]$") then
+			S.Key=input.KeyCode
+			binding=false
+			note("Tecla del aimbot: "..S.Key.Name)
+		else
+			note("Solo letras A-Z; no se admiten botones del mouse.")
+		end
+		refresh()
+		return
+	end
+	if processed then return end
 	if input.KeyCode==Enum.KeyCode.Backspace then stopAll()
-	elseif input.KeyCode==Enum.KeyCode.RightShift then togglePanel() end
+	elseif input.KeyCode==Enum.KeyCode.RightShift then togglePanel()
+	elseif input.UserInputType==Enum.UserInputType.Keyboard and input.KeyCode==S.Key then toggleAim() end
 end)
-on(me.CharacterRemoving,function() target=nil; stopBot() end)
+
+on(me.CharacterRemoving,function() target=nil; stickyTarget=nil; stopBot() end)
 
 -- Screen-space selection with visibility and direct-reticle priority.
-local function pickClosest(camera, center)
+local function chooseCandidate(candidates,radius,locked)
+	local best
+	for _,c in ipairs(candidates) do
+		if c.Visible and c.Score<=radius then
+			if locked and c.Player==locked then return c end
+			if not best or (c.Direct and not best.Direct)
+				or (c.Direct==best.Direct and (c.Score<best.Score
+				or (c.Score==best.Score and c.Depth<best.Depth))) then best=c end
+		end
+	end
+	return best
+end
+
+local function pickClosest(camera,center)
 	local params=RaycastParams.new()
 	params.FilterType=Enum.RaycastFilterType.Exclude
 	params.FilterDescendantsInstances=me.Character and {me.Character,camera} or {camera}
 	local origin=camera.CFrame.Position
+	local function clearAt(model,position)
+		local hit=workspace:Raycast(origin,position-origin,params)
+		return not hit or hit.Instance:IsDescendantOf(model)
+	end
 	local ray=camera:ViewportPointToRay(center.X,center.Y)
-	local direct=workspace:Raycast(ray.Origin,ray.Direction*10000,params)
-	local directPlayer=nil
-	if direct then
-		local ancestor=direct.Instance
+	local hit=workspace:Raycast(ray.Origin,ray.Direction*10000,params)
+	local direct
+	if hit then
+		local ancestor=hit.Instance
 		while ancestor and ancestor~=workspace do
 			if ancestor:IsA("Model") then
-				directPlayer=P:GetPlayerFromCharacter(ancestor)
-				if directPlayer then break end
+				direct=P:GetPlayerFromCharacter(ancestor)
+				if direct then break end
 			end
 			ancestor=ancestor.Parent
 		end
 	end
-	local bestPlayer,bestPart,bestScore,bestWorld=nil,nil,math.huge,math.huge
+	local candidates={}
 	for _,p in ipairs(P:GetPlayers()) do
 		if enemy(p) then
 			local model=p.Character
-			local selectedPart=aimPart(model)
-			if selectedPart then
-				local point,onScreen=camera:WorldToViewportPoint(selectedPart.Position)
-				local hit=workspace:Raycast(origin,selectedPart.Position-origin,params)
-				local clear=not hit or hit.Instance:IsDescendantOf(model)
-				if onScreen and point.Z>0 and clear then
-					-- Score the visible body, not just the requested aim point.
-					local top=part(model,"Head") or selectedPart
-					local _,root=body(model)
-					local lower=part(model,"LowerTorso") or part(model,"Torso") or root
-					local a=camera:WorldToViewportPoint(top.Position)
-					local b=camera:WorldToViewportPoint(lower.Position)
-					local closest=Vector2.new(point.X,point.Y)
-					if a.Z>0 and b.Z>0 then
-						local start=Vector2.new(a.X,a.Y)
-						local span=Vector2.new(b.X-a.X,b.Y-a.Y)
-						local t=span:Dot(span)>0 and math.clamp((center-start):Dot(span)/span:Dot(span),0,1) or 0
-						closest=start+span*t
-					end
-					local score=(closest-center).Magnitude
-					local aimDistance=(Vector2.new(point.X,point.Y)-center).Magnitude
-					-- Both the selected body and the actual aim point must stay in the FOV.
-					if score<=S.FOV and aimDistance<=S.FOV then
-						if p==directPlayer then return p,selectedPart end
-						local distance=(selectedPart.Position-origin).Magnitude
-						if score<bestScore-.5 or (math.abs(score-bestScore)<=.5 and distance<bestWorld) then
-							bestPlayer,bestPart,bestScore,bestWorld=p,selectedPart,score,distance
+			local requested=aimPart(model)
+			if requested then
+				local _,root=body(model)
+				local score=math.huge
+				-- Detect the character's visible body area, independently of Head/Torso aim.
+				if p==direct then score=0
+				else
+					for _,limb in ipairs(model:GetChildren()) do
+						if limb:IsA("BasePart") and limb.Name~="HumanoidRootPart"
+							and limb.Transparency<1 and clearAt(model,limb.Position) then
+							local minX,minY,maxX,maxY=math.huge,math.huge,-math.huge,-math.huge
+							local inFront=true
+							local half=limb.Size*.5
+							for x=-1,1,2 do for y=-1,1,2 do for z=-1,1,2 do
+								local corner=limb.CFrame:PointToWorldSpace(Vector3.new(half.X*x,half.Y*y,half.Z*z))
+								local screen=camera:WorldToViewportPoint(corner)
+								if screen.Z<=0 then inFront=false end
+								minX,minY=math.min(minX,screen.X),math.min(minY,screen.Y)
+								maxX,maxY=math.max(maxX,screen.X),math.max(maxY,screen.Y)
+							end end end
+							if inFront and maxX>=0 and maxY>=0
+								and minX<=camera.ViewportSize.X and minY<=camera.ViewportSize.Y then
+								local closest=Vector2.new(math.clamp(center.X,minX,maxX),
+									math.clamp(center.Y,minY,maxY))
+								score=math.min(score,(closest-center).Magnitude)
+							end
 						end
 					end
+				end
+				if score<=S.FOV then
+					local screen=camera:WorldToViewportPoint(requested.Position)
+					local point=nil
+					if screen.Z>0 and clearAt(model,requested.Position) then point=requested end
+					table.insert(candidates,{Player=p,Point=point,Score=score,
+						Depth=(root.Position-origin).Magnitude,Visible=true,Direct=p==direct})
 				end
 			end
 		end
 	end
-	return bestPlayer,bestPart
+	local chosen=chooseCandidate(candidates,S.FOV,S.Sticky and stickyTarget or nil)
+	stickyTarget=S.Sticky and chosen and chosen.Player or nil
+	if chosen then return chosen.Player,chosen.Point,chosen.Score end
+	return nil,nil,nil
 end
 
 
@@ -476,8 +562,9 @@ R:BindToRenderStep("SimpleCombatAim",Enum.RenderPriority.Camera.Value+1,function
 	local selected=nil
 	target=nil
 	if S.Enabled and (S.Aim or S.Mode~=nil) and body(me.Character)
-		and not GuiService.MenuIsOpen and not U:GetFocusedTextBox() then
+		and not binding and not dragInput and not GuiService.MenuIsOpen and not U:GetFocusedTextBox() then
 		target,selected=pickClosest(camera,center)
+	else stickyTarget=nil
 	end
 	 if selected and (selected.Position-camera.CFrame.Position).Magnitude>.01 then
 		local ray=camera:ViewportPointToRay(center.X,center.Y)
@@ -491,6 +578,7 @@ R:BindToRenderStep("SimpleCombatAim",Enum.RenderPriority.Camera.Value+1,function
 	stroke.Color=target and Color3.fromRGB(250,250,248) or blue
 	if os.clock()<messageUntil then status.Text=message
 	elseif not S.Enabled then status.Text="Desactivado"
+	elseif target and not selected then status.Text=S.Part.." oculto: "..target.Name
 	elseif target then status.Text="Objetivo: "..target.Name.." | "..S.Part
 	elseif S.Mode then status.Text=botTarget and ("Buscando: "..botTarget.Name) or "Buscando objetivos..."
 	elseif S.Aim then status.Text="Sin objetivo visible dentro del FOV"
