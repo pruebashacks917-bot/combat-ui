@@ -17,6 +17,8 @@ if old then old:Destroy() end
 local S = {Enabled=false, Aim=false, Lock=false, FOV=200, Smooth=0,
 	Part="Head", Center="Crosshair", Mode=nil, Key=Enum.KeyCode.Q, Sticky=false, TeamCheck=false, Skeleton=false, Tracer=false, Chams=false, Names=false, Health=false,
  ThroughWalls=true, Colors={Skeleton=Color3.new(1,1,1),Tracer=Color3.new(1,1,1),Chams=Color3.new(1,1,1),Names=Color3.new(1,1,1),Health=Color3.fromRGB(100,255,150)}}
+S.Activation="Toggle"
+local heldAim=false
 local binding=false
 local stickyTarget=nil
 local frameMotion,mouseIntent=Vector2.zero,Vector2.zero
@@ -235,14 +237,42 @@ local function number(parent,titleText,x,y,w,get,set,minimum,maximum)
 		fill.Size=UDim2.new((get()-minimum)/(maximum-minimum),0,1,0)
 	end)
 end
+local dropdown=nil
+local function closeDropdown()
+    if dropdown then dropdown:Destroy();dropdown=nil end
+end
 local function cycle(parent,titleText,x,y,w,values,get,set)
-	label(parent,titleText,x,y,w,17,12)
-	local b=button(parent,"",x,y+19,w,20,function()
-		local index=table.find(values,get()) or 1
-		set(values[index%#values+1]); refresh()
-	end)
-	table.insert(widgetUpdates,function() b.Text=tostring(get()).."  >" end)
-	return b
+    label(parent,titleText,x,y,w,17,12)
+    local b=button(parent,"",x,y+19,w,20)
+    on(b.Activated,function()
+        local wasOpen=dropdown and dropdown:GetAttribute("Owner")==titleText
+        closeDropdown()
+        if wasOpen then return end
+        local layer=new("TextButton",{Text="",AutoButtonColor=false,BackgroundTransparency=1,
+            Size=UDim2.fromScale(1,1),ZIndex=200},gui)
+        dropdown=layer;layer:SetAttribute("Owner",titleText)
+        on(layer.Activated,closeDropdown)
+        local factor=b.AbsoluteSize.X/w
+        local width=b.AbsoluteSize.X
+        local rowHeight=24*factor
+        local height=#values*rowHeight+4
+        local pos=b.AbsolutePosition
+        local area=gui.AbsoluteSize
+        local popup=rect(layer,math.clamp(pos.X,0,math.max(0,area.X-width)),
+            math.clamp(pos.Y+b.AbsoluteSize.Y+2,0,math.max(0,area.Y-height)),width,height,"Background")
+        popup.ZIndex=201;outline(popup)
+        for i,value in ipairs(values) do
+            local option=button(popup,(value==get() and "[x] " or "[ ] ")..tostring(value),
+                2,2+(i-1)*rowHeight,width-4,rowHeight,function()
+                    set(value);closeDropdown();refresh()
+                end)
+            option.ZIndex=202;option.TextSize=math.max(9,12*factor)
+            option.TextXAlignment=Enum.TextXAlignment.Left
+            if value==get() then option.TextColor3=UI.Theme.Accent end
+        end
+    end)
+    table.insert(widgetUpdates,function() b.Text=tostring(get()).."  v" end)
+    return b
 end
 local function colorHex(c)
 	return string.format("%02X%02X%02X",math.round(c.R*255),math.round(c.G*255),math.round(c.B*255))
@@ -299,11 +329,14 @@ buttons.Aim=check(a,"Enabled",8,35,240,function()return S.Aim end,function()end)
 -- Existing handlers below own these two state changes.
 buttons.Lock=check(a,"Direct aim",8,58,240,function()return S.Lock end,function()end)
 local sticky=check(a,"Sticky target",8,81,240,function()return S.Sticky end,function()end)
-label(a,"Toggle key",9,110,100,20)
+label(a,"Activation key",9,110,100,20)
 local activeCount=button(a,"[Q]",130,110,118,20)
 buttons.Center=cycle(a,"Aim mode",9,140,239,{"Camera","Mouse"},
-	function()return S.Center=="Cursor" and "Mouse" or "Camera" end,function()end)
-buttons.Part=cycle(a,"Target part",9,181,239,aimParts,function()return S.Part end,function()end)
+	function()return S.Center=="Cursor" and "Mouse" or "Camera" end,
+	function(v) S.Center=v=="Mouse" and "Cursor" or "Crosshair";target=nil;stickyTarget=nil end)
+buttons.Part=cycle(a,"Target part",9,181,239,aimParts,function()return S.Part end,function(v)S.Part=v;randomModel=nil;randomPart=nil end)
+cycle(pages.Aimbot,"Activation",280,345,239,{"Toggle","Hold"},function()return S.Activation end,
+    function(v) S.Activation=v;S.Aim=false;heldAim=false;target=nil;stickyTarget=nil end)
 local b=group(pages.Aimbot,"Automation",276,13,258,157)
 local auto=check(b,"Autoplay",8,12,240,function()return S.Mode=="Auto" end,function()end)
 local kill=check(b,"Kill all / one pass",8,35,240,function()return S.Mode=="All" end,function()end)
@@ -404,8 +437,8 @@ label(credits,"Combat UI - custom build",9,15,239,18)
 label(credits,"UI inspired by your references.",9,40,239,18,11,"Muted")
 label(credits,"v4.1 / client-side interface",9,68,239,18,11,"Muted")
 local help=group(pages.Settings,"Controls",4,630,258,146)
-label(help,"Mouse buttons cannot be keybinds.",9,14,239,18,11,"Muted")
-label(help,"Escape cancels key assignment.",9,36,239,18,11,"Muted")
+label(help,"Keyboard + mouse buttons supported.",9,14,239,18,11,"Muted")
+label(help,"Escape cancels / stops everything.",9,36,239,18,11,"Muted")
 label(help,"UI settings do not change",9,65,239,18,11,"Muted")
 label(help,"the targeting or damage rules.",9,84,239,18,11,"Muted")
 label(help,"Config load stops automation.",9,115,239,18,11,"Muted")
@@ -425,7 +458,7 @@ local function activeRows()
 	local rows={}
 	if S.Enabled then
 		if S.Aim or S.Mode then
-			table.insert(rows,"["..S.Key.Name.."] "..(S.Center=="Cursor" and "mouse" or "camera").." aimbot (Toggle)")
+			table.insert(rows,"["..S.Key.Name.."] "..(S.Center=="Cursor" and "mouse" or "camera").." aimbot ("..S.Activation..")")
 		end
 		if S.Sticky then table.insert(rows,"[-] sticky target") end
 		if S.Lock then table.insert(rows,"[-] direct aim") end
@@ -484,7 +517,7 @@ local function validName(name)
 	return type(name)=="string" and #name>0 and #name<=32 and name:match("^[%w_-]+$")~=nil
 end
 local function snapshot()
-	local data={Version=4,State={FOV=S.FOV,Smooth=S.Smooth,Part=S.Part,Center=S.Center,Key=S.Key.Name},
+	local data={Version=4,State={FOV=S.FOV,Smooth=S.Smooth,Part=S.Part,Center=S.Center,Key=S.Key.Name,Activation=S.Activation},
 		Colors={},Interface={MenuKey=UI.MenuKey.Name,WatermarkPosition=UI.WatermarkPosition,Discord=UI.Discord},Theme={}}
 	for _,key in ipairs(boolKeys) do data.State[key]=S[key] end
 	for key,value in pairs(S.Colors) do data.Colors[key]=colorHex(value) end
@@ -518,7 +551,10 @@ local function decodeConfig(data)
 	assert(table.find(aimParts,data.State.Part)~=nil,"Invalid target part")
 	assert(data.State.Center=="Crosshair" or data.State.Center=="Cursor","Invalid aim mode")
 	clean.State.Part,clean.State.Center=data.State.Part,data.State.Center
-	clean.State.Key=assert(keyboardKey(data.State.Key),"Invalid aimbot key")
+	local mouseKeys={MouseButton1=Enum.UserInputType.MouseButton1,MouseButton2=Enum.UserInputType.MouseButton2,MouseButton3=Enum.UserInputType.MouseButton3}
+    clean.State.Key=assert(mouseKeys[data.State.Key] or keyboardKey(data.State.Key),"Invalid aimbot key")
+    clean.State.Activation=data.State.Activation or "Toggle"
+    assert(clean.State.Activation=="Hold" or clean.State.Activation=="Toggle","Invalid activation mode")
 	clean.Interface.MenuKey=assert(keyboardKey(data.Interface.MenuKey),"Invalid menu key")
 	for key in pairs(S.Colors) do clean.Colors[key]=assert(parseColor(data.Colors[key]),"Invalid ESP color") end
 	for key in pairs(UI.Theme) do clean.Theme[key]=assert(parseColor(data.Theme[key]),"Invalid theme color") end
@@ -985,7 +1021,7 @@ end
 on(activeCount.Activated,function()
 	binding=not binding; menuBinding=false
 	refresh()
-	note(binding and "Pulsa la tecla que quieras. Escape cancela; mouse no permitido." or "Asignacion cancelada.")
+	note(binding and "Pulsa la tecla que quieras. Escape cancela; mouse permitido." or "Asignacion cancelada.")
 end)
 local dragHeader=new("Frame",{Position=UDim2.fromOffset(7,3),
 	Size=UDim2.fromOffset(480,21),BackgroundTransparency=1,Active=true,ZIndex=10},panel)
@@ -1025,15 +1061,10 @@ on(buttons.Enabled.Activated,function()
 end)
 on(buttons.Aim.Activated,toggleAim)
 on(buttons.Lock.Activated,function() S.Lock=not S.Lock; refresh() end)
-on(buttons.Part.Activated,function()
-	S.Part=aimParts[(table.find(aimParts,S.Part) or 1)%#aimParts+1];randomModel=nil;randomPart=nil;refresh()
-end)
-on(buttons.Center.Activated,function()
-	S.Center=S.Center=="Crosshair" and "Cursor" or "Crosshair"; refresh()
-end)
 on(kill.Activated,function() startBot("All") end)
 on(auto.Activated,function() startBot("Auto") end)
 togglePanel=function()
+	closeDropdown()
 	panel.Visible=not panel.Visible
 	open.Visible=not panel.Visible
 	syncMenuControls(true)
@@ -1041,33 +1072,52 @@ end
 on(hide.Activated,togglePanel)
 on(open.Activated,togglePanel)
 on(close.Activated,function() gui:Destroy() end)
+local function matchesAim(input)
+    return input.KeyCode==S.Key or input.UserInputType==S.Key
+end
 on(U.InputBegan,function(input,processed)
-	if U:GetFocusedTextBox() then return end
-	if menuBinding then
-        if input.UserInputType~=Enum.UserInputType.Keyboard then return end
-        if input.KeyCode==Enum.KeyCode.Escape then menuBinding=false
-        elseif input.KeyCode~=Enum.KeyCode.Unknown then UI.MenuKey=input.KeyCode;menuBinding=false end
-        refresh();return
+    if input.KeyCode==Enum.KeyCode.Escape then
+        closeDropdown()
+        binding=false;menuBinding=false;heldAim=false;S.Aim=false;stopAll();refresh();return
+    end
+    if U:GetFocusedTextBox() then return end
+    if menuBinding then
+        if input.UserInputType==Enum.UserInputType.Keyboard and input.KeyCode~=Enum.KeyCode.Unknown then
+            UI.MenuKey=input.KeyCode;menuBinding=false;refresh()
+        end
+        return
     end
     if binding then
-		if input.UserInputType~=Enum.UserInputType.Keyboard then return end
-		if input.KeyCode==Enum.KeyCode.Escape then
-			binding=false; note("Asignacion cancelada.")
-		elseif input.KeyCode~=Enum.KeyCode.Unknown then
-			S.Key=input.KeyCode; binding=false
-			note("Tecla del aimbot: "..S.Key.Name)
-		end
-		refresh()
-		return
-	end
-	if GuiService.MenuIsOpen then return end
-	-- The custom key has priority over default shortcuts.
-	if input.UserInputType==Enum.UserInputType.Keyboard and input.KeyCode==S.Key then
-		toggleAim(); return
-	end
-	if processed then return end
-	if input.KeyCode==Enum.KeyCode.Backspace then stopAll()
-	elseif input.KeyCode==UI.MenuKey then togglePanel() end
+        local kind=input.UserInputType
+        if kind==Enum.UserInputType.Keyboard and input.KeyCode~=Enum.KeyCode.Unknown then S.Key=input.KeyCode
+        elseif kind==Enum.UserInputType.MouseButton1 or kind==Enum.UserInputType.MouseButton2 or kind==Enum.UserInputType.MouseButton3 then S.Key=kind
+        else return end
+        binding=false;heldAim=false;S.Aim=false;refresh();return
+    end
+    if GuiService.MenuIsOpen then return end
+    if matchesAim(input) then
+        -- Ignore clicks on our interface without consuming weapon input.
+        if input.UserInputType~=Enum.UserInputType.Keyboard then
+            local pos=U:GetMouseLocation()
+            for _,item in ipairs(pg:GetGuiObjectsAtPosition(pos.X,pos.Y)) do
+                if item:IsDescendantOf(gui) then return end
+            end
+        end
+        if S.Activation=="Hold" then heldAim=true;S.Enabled=true;S.Aim=true;refresh()
+        else toggleAim() end
+        return
+    end
+    if processed then return end
+    if input.KeyCode==Enum.KeyCode.Backspace then heldAim=false;S.Aim=false;stopAll()
+    elseif input.KeyCode==UI.MenuKey then togglePanel() end
+end)
+on(U.InputEnded,function(input)
+    if heldAim and matchesAim(input) then
+        heldAim=false;S.Aim=false;target=nil;stickyTarget=nil;stopBot();refresh()
+    end
+end)
+on(U.WindowFocusReleased,function()
+    heldAim=false;S.Aim=false;stopAll();refresh()
 end)
 on(U.InputChanged,function(input)
 	if input.UserInputType==Enum.UserInputType.MouseMovement
@@ -1241,7 +1291,7 @@ R:BindToRenderStep("SimpleCombatAim",Enum.RenderPriority.Camera.Value+1,function
 		randomModel,randomPart=nil,nil
 	end
 	if selected and (selected.Position-camera.CFrame.Position).Magnitude>.01 then
-		local alpha=aimAlpha(S.Smooth,S.Lock,manualMove,dt)
+		local alpha=1
 		if S.Center=="Cursor" then
 			aimIssue=applyMouseAim(camera,selected,alpha)
 		else
