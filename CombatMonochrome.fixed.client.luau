@@ -162,7 +162,7 @@ panel.AnchorPoint=Vector2.new(0,.5)
 panel.Position=UDim2.new(0,24,.5,0)
 outline(panel)
 local scale=new("UIScale",{},panel)
-local title=label(panel,"Combat UI | PRISON-5",9,4,410,19,12)
+local title=label(panel,"Combat UI | PRISON-6",9,4,410,19,12)
 rect(panel,7,27,546,2,"Accent")
 local function button(parent,text,x,y,w,h,fn)
 	local b=theme(new("TextButton",{Text=text,Position=UDim2.fromOffset(x,y),
@@ -424,7 +424,7 @@ number(themeGroup,"Menu transparency",9,214,239,function()return UI.MenuAlpha en
 local rageConfig=new("Folder",{Name="RageSettings"},gui)
 local rageDefaults={Enabled=false,Aimbot=true,SilentAim=false,AutoShoot=false,AutoWall=false,
  Wallbang=false,Prediction=false,PredictionTime=0,NoRecoil=true,NoSpread=false,HitChance=0,
- FOV=200,Selection="Manual",TargetKey="Sin asignar",SelectedUserId=0,Hitbox="Head",VisibilityCheck=true,AutoSwitch=true,
+ FOV=200,Selection="Manual",TargetKey="Sin asignar",RageKey="Sin asignar",SelectedUserId=0,Hitbox="Head",VisibilityCheck=true,AutoSwitch=true,
  RapidFire=false,Aim360=false,TeamCheck=true,TeleportTarget=true,Visualize=true,Strafe=false,StrafeRadius=5,StrafeSpeed=90,ClosestPart=false,IgnoreProtected=false,
  LimitDistance=false,MaxDistance=800,ReactionTime=0,ForgetTime=1,FullAuto=false,FireRatePercent=100,
  NotifyHit=true,NotifyDuration=2,NotifyText="Hit {NAME} for {DMG} in {PART} ({WEAPON})"}
@@ -454,13 +454,17 @@ cycle(rageRight,"Hitbox Selection",9,155,239,aimParts,
  function()return rageConfig:GetAttribute("Hitbox")end,function(v)rageConfig:SetAttribute("Hitbox",v)end)
 number(rageRight,"Prediction time (s)",9,210,239,function()return rageConfig:GetAttribute("PredictionTime")end,
  function(v)rageConfig:SetAttribute("PredictionTime",v)end,0,.25)
+local rageBinding=false
 local targetBinding=false
 local targetControls=group(pages["Rage Bot"],"OBJETIVO",4,13,530,200)
 local rageGhost=nil
 local observing=false
 local observedCamera,previousSubject
 local selectKeyButton=button(targetControls,"Target Selection [Sin asignar] - cambiar tecla",9,16,508,25,function()
- targetBinding=not targetBinding;binding=false;menuBinding=false
+ targetBinding=not targetBinding;rageBinding=false;binding=false;menuBinding=false
+end)
+local rageKeyButton=button(targetControls,"Rage ON/OFF [Sin asignar]",9,151,508,25,function()
+ rageBinding=not rageBinding;targetBinding=false;binding=false;menuBinding=false
 end)
 local selectedLabel=label(targetControls,"Objetivo: ninguno",9,51,508,20,11,"Muted")
 local observeButton
@@ -494,13 +498,12 @@ local function selectRageTarget(p)
  if not p or p==me or p.Parent~=P then return end
  rageConfig:SetAttribute("SelectedUserId",p.UserId)
  rageConfig:SetAttribute("Selection","Manual")
- rageConfig:SetAttribute("RapidFire",true);rageConfig:SetAttribute("AutoShoot",true);rageConfig:SetAttribute("SilentAim",true)
- rageConfig:SetAttribute("Enabled",true)
+
  refresh()
- note("Rage ON: "..p.Name..". Pulsa tu tecla otra vez para apagar.")
+ note("Objetivo seleccionado: "..p.Name..". Rage no cambia de estado.")
 end
 label(targetControls,"Mouse sobre jugador + tecla: selecciona sin hacer clic.",9,119,508,22,11,"Muted")
-label(targetControls,"Prison Life: revisa el estado en Arma / impactos.",9,152,508,27,11,"Muted")
+
 local serverGroup=group(pages["Rage Bot"],"JUGADORES DEL SERVIDOR",4,231,530,180)
 local serverList=new("ScrollingFrame",{Position=UDim2.fromOffset(8,14),Size=UDim2.fromOffset(514,156),
  BackgroundTransparency=1,BorderSizePixel=0,ScrollBarThickness=4,CanvasSize=UDim2.fromOffset(0,0)},serverGroup)
@@ -533,6 +536,7 @@ rebuildServerList()
 on(R.Heartbeat,function()
  local p=selectedPlayer()
  if p and not body(p.Character) then rageConfig:SetAttribute("SelectedUserId",0);p=nil end
+ rageKeyButton.Text=rageBinding and "Pulsa tecla Rage ON/OFF..." or "Rage ON/OFF ["..rageConfig:GetAttribute("RageKey").."] - cambiar tecla"
  selectedLabel.Text="Objetivo: "..(p and p.Name or "ninguno")
  selectKeyButton.Text=targetBinding and "Pulsa la nueva tecla... (Esc cancela)" or "Target Selection ["..rageConfig:GetAttribute("TargetKey").."] - cambiar tecla"
  observeButton.Text=observing and "Dejar de observar" or "Observar objetivo"
@@ -545,8 +549,46 @@ on(R.Heartbeat,function()
 end)
 on(gui.Destroying,endObserve)
 check(rageRight,"TP al objetivo",8,266,240,function()return rageConfig:GetAttribute("TeleportTarget")end,function(v)rageConfig:SetAttribute("TeleportTarget",v)end)
-check(rageRight,"Fake Position: copia local",8,294,240,function()return rageConfig:GetAttribute("Visualize")end,function(v)rageConfig:SetAttribute("Visualize",v)end)
+check(rageRight,"Copia local controlable",8,294,240,function()return rageConfig:GetAttribute("Visualize")end,function(v)rageConfig:SetAttribute("Visualize",v)end)
 label(rageRight,"Copia local: WASD + Espacio.",9,334,239,30,11,"Muted")
+do
+ local getting=false
+ button(rageRight,"Conseguir Remington 870",9,383,239,26,function()
+  if getting then return end
+  local h,root=body(me.Character);if not root then note("Personaje no disponible.");return end
+  local items=workspace:FindFirstChild("Prison_ITEMS")
+  local giver=items and items:FindFirstChild("giver")
+  local gun=giver and giver:FindFirstChild("Remington 870")
+  local pickup=gun and gun:FindFirstChild("ITEMPICKUP")
+  local remoteFolder=workspace:FindFirstChild("Remote")
+  local remote=remoteFolder and remoteFolder:FindFirstChild("ItemHandler")
+  if not pickup or not pickup:IsA("BasePart") or not remote or not remote:IsA("RemoteFunction") then note("No se encontro el pickup o ItemHandler.");return end
+  -- Stop before taking the return snapshot, so it is the user's controlled position.
+  local proxyRoot=rageGhost and rageGhost:FindFirstChild("HumanoidRootPart")
+  local returnPosition=proxyRoot and proxyRoot.CFrame or root.CFrame
+  rageConfig:SetAttribute("Enabled",false);endObserve()
+  task.defer(function()
+   local _,currentRoot=body(me.Character);if not currentRoot then return end
+   local character=me.Character;local saved=returnPosition;getting=true
+   local returned=false
+   local function back()
+    if returned then return end;returned=true
+    if me.Character==character and currentRoot.Parent then currentRoot.CFrame=saved;currentRoot.AssemblyLinearVelocity=Vector3.zero end
+    getting=false
+   end
+   task.delay(3,back)
+   local ok=pcall(function()
+    currentRoot.CFrame=pickup.CFrame*CFrame.new(0,3,0)
+    task.wait(.15);remote:InvokeServer(pickup)
+   end)
+   back()
+   local bag=me:FindFirstChildOfClass("Backpack")
+   local obtained=(bag and bag:FindFirstChild("Remington 870")) or (me.Character and me.Character:FindFirstChild("Remington 870"))
+   note(obtained and "Remington recibida; posicion restaurada." or (ok and "Solicitud enviada; arma aun no confirmada." or "No se pudo pedir el arma; posicion restaurada."))
+  end)
+ end)
+end
+
 -- Local controllable proxy. The server still sees the original character at the target.
 do
  local sourceCharacter=nil
@@ -559,6 +601,12 @@ do
  local orbitTime=os.clock()
  local function clearProxy()
   if not rageGhost then return end
+  local _,realRoot=body(me.Character)
+  local proxyRoot=rageGhost:FindFirstChild("HumanoidRootPart")
+  if realRoot and proxyRoot and sourceCharacter==me.Character then
+   realRoot.CFrame=proxyRoot.CFrame
+   realRoot.AssemblyLinearVelocity=Vector3.zero;realRoot.AssemblyAngularVelocity=Vector3.zero
+  end
   if observing then endObserve() end
   if proxyCamera and proxyCamera==workspace.CurrentCamera then
    local own=me.Character and me.Character:FindFirstChildOfClass("Humanoid")
@@ -621,7 +669,7 @@ do
    end
    orbitAngle=(orbitAngle+math.rad(rageConfig:GetAttribute("StrafeSpeed") or 90)*dt)%(math.pi*2)
    if now>=nextTeleport then
-    nextTeleport=now+.05
+    nextTeleport=now
     local radius=math.clamp(rageConfig:GetAttribute("StrafeRadius") or 5,3,20)
     local offset=Vector3.new(math.cos(orbitAngle)*radius,0,math.sin(orbitAngle)*radius)
     local position=otherRoot.Position+offset
@@ -633,7 +681,8 @@ do
     local floor=workspace:Raycast(position+Vector3.new(0,5,0),Vector3.new(0,-15,0),params)
     if not wall and floor and floor.Normal.Y>.6 then
      position=Vector3.new(position.X,floor.Position.Y+own.HipHeight+root.Size.Y*.5,position.Z)
-     root.CFrame=CFrame.lookAt(position,Vector3.new(otherRoot.Position.X,position.Y,otherRoot.Position.Z))
+     local desired=CFrame.lookAt(position,Vector3.new(otherRoot.Position.X,position.Y,otherRoot.Position.Z))
+     root.CFrame=root.CFrame:Lerp(desired,1-math.exp(-dt*18))
      root.AssemblyLinearVelocity=Vector3.zero;root.AssemblyAngularVelocity=Vector3.zero
     end
    end
@@ -834,7 +883,7 @@ activeLabel.TextYAlignment=Enum.TextYAlignment.Top
 activeLabel.TextTruncate=Enum.TextTruncate.None
 local watermark=rect(gui,8,8,365,23,"Background")
 outline(watermark);rect(watermark,0,0,365,1,"Accent")
-local watermarkText=label(watermark,"Combat UI | PRISON-5",6,3,353,18,11)
+local watermarkText=label(watermark,"Combat UI | PRISON-6",6,3,353,18,11)
 
 local function activeRows()
 	local rows={}
@@ -1108,7 +1157,7 @@ R:BindToRenderStep("SimpleCombatHUD",Enum.RenderPriority.Last.Value,function(dt)
 	hudClock=hudClock+dt;fpsClock=fpsClock+dt;frames=frames+1
 	if hudClock>=.1 then refreshHUD();hudClock=0 end
 	if fpsClock>=.5 then
-		watermarkText.Text=string.format("Combat UI | PRISON-5 | %s | %d fps",me.Name,math.round(frames/fpsClock))
+		watermarkText.Text=string.format("Combat UI | PRISON-6 | %s | %d fps",me.Name,math.round(frames/fpsClock))
 		fpsClock,frames=0,0
 	end
 end)
@@ -1463,13 +1512,30 @@ end
 on(U.InputBegan,function(input,processed)
     if input.KeyCode==Enum.KeyCode.Escape then
         closeDropdown()
-        targetBinding=false;endObserve()
+        targetBinding=false;rageBinding=false;endObserve()
         binding=false;menuBinding=false;heldAim=false;S.Aim=false;stopAll();refresh();return
     end
     if U:GetFocusedTextBox() then return end
+    if rageBinding then
+        if input.UserInputType==Enum.UserInputType.Keyboard and input.KeyCode~=Enum.KeyCode.Unknown then
+            if input.KeyCode==S.Key or input.KeyCode==UI.MenuKey or input.KeyCode==Enum.KeyCode.Backspace or input.KeyCode.Name==rageConfig:GetAttribute("TargetKey") then
+                note("Tecla ocupada. Elige una diferente.");return
+            end
+            rageConfig:SetAttribute("RageKey",input.KeyCode.Name);rageBinding=false
+        end
+        return
+    end
+    if not binding and not menuBinding and not targetBinding and not GuiService.MenuIsOpen
+        and input.UserInputType==Enum.UserInputType.Keyboard and input.KeyCode.Name==rageConfig:GetAttribute("RageKey") then
+        local enable=not rageConfig:GetAttribute("Enabled")
+        if enable and not selectedPlayer() then note("Selecciona un objetivo primero.");return end
+        rageConfig:SetAttribute("Enabled",enable)
+        if not enable then endObserve() end
+        note(enable and "Rage ON" or "Rage OFF");refresh();return
+    end
     if targetBinding then
         if input.UserInputType==Enum.UserInputType.Keyboard and input.KeyCode~=Enum.KeyCode.Unknown then
-            if input.KeyCode==S.Key or input.KeyCode==UI.MenuKey or input.KeyCode==Enum.KeyCode.Backspace then
+            if input.KeyCode==S.Key or input.KeyCode==UI.MenuKey or input.KeyCode==Enum.KeyCode.Backspace or input.KeyCode.Name==rageConfig:GetAttribute("RageKey") then
                 note("Elige otra tecla: esa activa Aimbot, el menu o Stop All.");return
             end
             rageConfig:SetAttribute("TargetKey",input.KeyCode.Name);targetBinding=false
@@ -1478,10 +1544,6 @@ on(U.InputBegan,function(input,processed)
     end
     if input.UserInputType==Enum.UserInputType.Keyboard and input.KeyCode.Name==rageConfig:GetAttribute("TargetKey")
         and not binding and not menuBinding and not GuiService.MenuIsOpen then
-        if rageConfig:GetAttribute("Enabled") then
-            rageConfig:SetAttribute("Enabled",false)
-            endObserve();note("Rage OFF. Tu tecla vuelve a seleccionar y activar.");refresh();return
-        end
         local hit=me:GetMouse().Target
         local chosen=nil
         while hit and hit~=workspace do
@@ -1500,14 +1562,14 @@ on(U.InputBegan,function(input,processed)
     end
     if menuBinding then
         if input.UserInputType==Enum.UserInputType.Keyboard and input.KeyCode~=Enum.KeyCode.Unknown then
-            if input.KeyCode.Name==rageConfig:GetAttribute("TargetKey") then note("Esa tecla pertenece a Target Selection.");return end
+            if input.KeyCode.Name==rageConfig:GetAttribute("TargetKey") or input.KeyCode.Name==rageConfig:GetAttribute("RageKey") then note("Esa tecla pertenece a Target Selection.");return end
             UI.MenuKey=input.KeyCode;menuBinding=false;refresh()
         end
         return
     end
     if binding then
         local kind=input.UserInputType
-        if kind==Enum.UserInputType.Keyboard and input.KeyCode.Name==rageConfig:GetAttribute("TargetKey") then
+        if kind==Enum.UserInputType.Keyboard and (input.KeyCode.Name==rageConfig:GetAttribute("TargetKey") or input.KeyCode.Name==rageConfig:GetAttribute("RageKey")) then
             note("Esa tecla pertenece a Target Selection. Elige otra.");return
         end
         if kind==Enum.UserInputType.Keyboard and input.KeyCode~=Enum.KeyCode.Unknown then S.Key=input.KeyCode
