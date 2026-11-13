@@ -162,7 +162,7 @@ panel.AnchorPoint=Vector2.new(0,.5)
 panel.Position=UDim2.new(0,24,.5,0)
 outline(panel)
 local scale=new("UIScale",{},panel)
-local title=label(panel,"Combat UI | PRISON-4",9,4,410,19,12)
+local title=label(panel,"Combat UI | PRISON-5",9,4,410,19,12)
 rect(panel,7,27,546,2,"Accent")
 local function button(parent,text,x,y,w,h,fn)
 	local b=theme(new("TextButton",{Text=text,Position=UDim2.fromOffset(x,y),
@@ -305,7 +305,7 @@ end
 for i,name in ipairs({"Aimbot","ESP","Rage Bot","Settings"}) do
 	local page=new("ScrollingFrame",{Name=name,Position=UDim2.fromOffset(9,62),
 		Size=UDim2.fromOffset(542,510),BackgroundTransparency=1,BorderSizePixel=0,
-		ScrollBarThickness=3,CanvasSize=UDim2.fromOffset(0,name=="Settings" and 824 or name=="Rage Bot" and 1310 or 510),
+		ScrollBarThickness=3,CanvasSize=UDim2.fromOffset(0,name=="Settings" and 824 or name=="Rage Bot" and 1540 or 510),
 		ScrollingDirection=Enum.ScrollingDirection.Y,Visible=name==UI.Tab},panel)
 	theme(page,"ScrollBarImageColor3","Accent")
 	pages[name]=page
@@ -425,7 +425,7 @@ local rageConfig=new("Folder",{Name="RageSettings"},gui)
 local rageDefaults={Enabled=false,Aimbot=true,SilentAim=false,AutoShoot=false,AutoWall=false,
  Wallbang=false,Prediction=false,PredictionTime=0,NoRecoil=true,NoSpread=false,HitChance=0,
  FOV=200,Selection="Manual",TargetKey="Sin asignar",SelectedUserId=0,Hitbox="Head",VisibilityCheck=true,AutoSwitch=true,
- RapidFire=false,Aim360=false,TeamCheck=true,TeleportTarget=true,Visualize=true,ClosestPart=false,IgnoreProtected=false,
+ RapidFire=false,Aim360=false,TeamCheck=true,TeleportTarget=true,Visualize=true,Strafe=false,StrafeRadius=5,StrafeSpeed=90,ClosestPart=false,IgnoreProtected=false,
  LimitDistance=false,MaxDistance=800,ReactionTime=0,ForgetTime=1,FullAuto=false,FireRatePercent=100,
  NotifyHit=true,NotifyDuration=2,NotifyText="Hit {NAME} for {DMG} in {PART} ({WEAPON})"}
 for key,value in pairs(rageDefaults) do rageConfig:SetAttribute(key,value) end
@@ -545,7 +545,7 @@ on(R.Heartbeat,function()
 end)
 on(gui.Destroying,endObserve)
 check(rageRight,"TP al objetivo",8,266,240,function()return rageConfig:GetAttribute("TeleportTarget")end,function(v)rageConfig:SetAttribute("TeleportTarget",v)end)
-check(rageRight,"Visualize: copia controlable",8,294,240,function()return rageConfig:GetAttribute("Visualize")end,function(v)rageConfig:SetAttribute("Visualize",v)end)
+check(rageRight,"Fake Position: copia local",8,294,240,function()return rageConfig:GetAttribute("Visualize")end,function(v)rageConfig:SetAttribute("Visualize",v)end)
 label(rageRight,"Copia local: WASD + Espacio.",9,334,239,30,11,"Muted")
 -- Local controllable proxy. The server still sees the original character at the target.
 do
@@ -554,6 +554,9 @@ do
  local proxyHumanoid=nil
  local motors={}
  local nextTeleport=0
+ local orbitAngle=0
+ local orbitTarget=nil
+ local orbitTime=os.clock()
  local function clearProxy()
   if not rageGhost then return end
   if observing then endObserve() end
@@ -609,8 +612,33 @@ do
    if sourceCharacter~=me.Character or not rageGhost or not rageGhost.Parent then buildProxy(me.Character) end
   else clearProxy() end
   if rageGhost then own:Move(Vector3.zero) end
-  if rageConfig:GetAttribute("TeleportTarget") and os.clock()>=nextTeleport then
-   nextTeleport=os.clock()+.2
+  local now=os.clock()
+  local dt=math.clamp(now-orbitTime,0,.1);orbitTime=now
+  if rageConfig:GetAttribute("Strafe") then
+   if orbitTarget~=p then
+    local offset=root.Position-otherRoot.Position
+    orbitAngle=math.atan2(offset.Z,offset.X);orbitTarget=p
+   end
+   orbitAngle=(orbitAngle+math.rad(rageConfig:GetAttribute("StrafeSpeed") or 90)*dt)%(math.pi*2)
+   if now>=nextTeleport then
+    nextTeleport=now+.05
+    local radius=math.clamp(rageConfig:GetAttribute("StrafeRadius") or 5,3,20)
+    local offset=Vector3.new(math.cos(orbitAngle)*radius,0,math.sin(orbitAngle)*radius)
+    local position=otherRoot.Position+offset
+    local params=RaycastParams.new();params.FilterType=Enum.RaycastFilterType.Exclude
+    local excluded={me.Character,p.Character}
+    if rageGhost then table.insert(excluded,rageGhost) end
+    params.FilterDescendantsInstances=excluded
+    local wall=workspace:Raycast(otherRoot.Position,offset,params)
+    local floor=workspace:Raycast(position+Vector3.new(0,5,0),Vector3.new(0,-15,0),params)
+    if not wall and floor and floor.Normal.Y>.6 then
+     position=Vector3.new(position.X,floor.Position.Y+own.HipHeight+root.Size.Y*.5,position.Z)
+     root.CFrame=CFrame.lookAt(position,Vector3.new(otherRoot.Position.X,position.Y,otherRoot.Position.Z))
+     root.AssemblyLinearVelocity=Vector3.zero;root.AssemblyAngularVelocity=Vector3.zero
+    end
+   end
+  elseif rageConfig:GetAttribute("TeleportTarget") and now>=nextTeleport then
+   orbitTarget=nil;nextTeleport=now+.2
    if (root.Position-otherRoot.Position).Magnitude>7 then
     local position=otherRoot.Position-otherRoot.CFrame.LookVector*4
     root.CFrame=CFrame.lookAt(position,Vector3.new(otherRoot.Position.X,position.Y,otherRoot.Position.Z))
@@ -647,6 +675,11 @@ do
  on(gui.Destroying,clearProxy)
 end
 
+local orbitGroup=group(pages["Rage Bot"],"Strafe / Fake Position",4,1325,530,190)
+check(orbitGroup,"Strafe: orbitar al objetivo",8,14,510,function()return rageConfig:GetAttribute("Strafe")end,function(v)rageConfig:SetAttribute("Strafe",v)end)
+number(orbitGroup,"Distancia (studs)",9,48,505,function()return rageConfig:GetAttribute("StrafeRadius")end,function(v)rageConfig:SetAttribute("StrafeRadius",v)end,3,20)
+number(orbitGroup,"Velocidad (grados/s)",9,92,505,function()return rageConfig:GetAttribute("StrafeSpeed")end,function(v)rageConfig:SetAttribute("StrafeSpeed",v)end,15,360)
+label(orbitGroup,"Fake Position es una copia LOCAL; no altera la posicion del servidor.",9,135,505,40,11,"Muted")
 local advanced=group(pages["Rage Bot"],"Targeting avanzado",4,940,258,350)
 local weaponOptions=group(pages["Rage Bot"],"Arma / impactos",276,940,258,350)
 for i,entry in ipairs({{"ClosestPart","Closest part"},{"IgnoreProtected","Ignore protected"},{"LimitDistance","Limit distance"}}) do
@@ -801,7 +834,7 @@ activeLabel.TextYAlignment=Enum.TextYAlignment.Top
 activeLabel.TextTruncate=Enum.TextTruncate.None
 local watermark=rect(gui,8,8,365,23,"Background")
 outline(watermark);rect(watermark,0,0,365,1,"Accent")
-local watermarkText=label(watermark,"Combat UI | PRISON-4",6,3,353,18,11)
+local watermarkText=label(watermark,"Combat UI | PRISON-5",6,3,353,18,11)
 
 local function activeRows()
 	local rows={}
@@ -1075,7 +1108,7 @@ R:BindToRenderStep("SimpleCombatHUD",Enum.RenderPriority.Last.Value,function(dt)
 	hudClock=hudClock+dt;fpsClock=fpsClock+dt;frames=frames+1
 	if hudClock>=.1 then refreshHUD();hudClock=0 end
 	if fpsClock>=.5 then
-		watermarkText.Text=string.format("Combat UI | PRISON-4 | %s | %d fps",me.Name,math.round(frames/fpsClock))
+		watermarkText.Text=string.format("Combat UI | PRISON-5 | %s | %d fps",me.Name,math.round(frames/fpsClock))
 		fpsClock,frames=0,0
 	end
 end)
