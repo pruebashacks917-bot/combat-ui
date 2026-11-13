@@ -162,7 +162,7 @@ panel.AnchorPoint=Vector2.new(0,.5)
 panel.Position=UDim2.new(0,24,.5,0)
 outline(panel)
 local scale=new("UIScale",{},panel)
-local title=label(panel,"Combat UI | CONNECTED-1",9,4,410,19,12)
+local title=label(panel,"Combat UI | PRISON-2",9,4,410,19,12)
 rect(panel,7,27,546,2,"Accent")
 local function button(parent,text,x,y,w,h,fn)
 	local b=theme(new("TextButton",{Text=text,Position=UDim2.fromOffset(x,y),
@@ -499,7 +499,7 @@ local function selectRageTarget(p)
  note("Objetivo: "..p.Name..". Seleccionado sin cambiar la activacion.")
 end
 label(targetControls,"Mouse sobre jugador + tecla: selecciona sin hacer clic.",9,119,508,22,11,"Muted")
-label(targetControls,"Funciones del arma: requieren la integracion instalada.",9,152,508,27,11,"Muted")
+label(targetControls,"Prison Life: revisa el estado en Arma / impactos.",9,152,508,27,11,"Muted")
 local serverGroup=group(pages["Rage Bot"],"JUGADORES DEL SERVIDOR",4,231,530,180)
 local serverList=new("ScrollingFrame",{Position=UDim2.fromOffset(8,14),Size=UDim2.fromOffset(514,156),
  BackgroundTransparency=1,BorderSizePixel=0,ScrollBarThickness=4,CanvasSize=UDim2.fromOffset(0,0)},serverGroup)
@@ -560,6 +560,90 @@ check(weaponOptions,"Notify confirmed hit",8,87,240,function()return rageConfig:
 number(weaponOptions,"Notify duration (s)",9,123,239,function()return rageConfig:GetAttribute("NotifyDuration")end,function(v)rageConfig:SetAttribute("NotifyDuration",v)end,1,10)
 input(weaponOptions,rageConfig:GetAttribute("NotifyText"),9,168,239,23,function(v)rageConfig:SetAttribute("NotifyText",v:sub(1,180))end)
 label(weaponOptions,"{NAME} {DMG} {PART} {WEAPON}",9,198,239,20,11,"Muted")
+-- Prison Life adapter: only the three fields evidenced by the supplied example.
+local prisonStatus="Prison Life: adaptador preparado"
+local gunAdapterStatus="GunStates: buscando arma..."
+do
+ local records={}
+ local pending={}
+ local clock=0
+ local function desiredGunValues(original,enabled,noSpread,fullAuto,rapid,percent)
+  local values={}
+  if not enabled then return values end
+  if noSpread and type(original.Spread)=="number" then values.Spread=0 end
+  if fullAuto and type(original.AutoFire)=="boolean" then values.AutoFire=true end
+  if type(original.FireRate)=="number" and original.FireRate>0 then
+   local multiplier=math.clamp(tonumber(percent) or 100,25,200)/100
+   if rapid then multiplier=math.max(multiplier,2) end
+   if multiplier~=1 then values.FireRate=math.max(.01,original.FireRate/multiplier) end
+  end
+  return values
+ end
+ local function update(record,enabled)
+  local desired=desiredGunValues(record.Original,enabled,
+   rageConfig:GetAttribute("NoSpread"),rageConfig:GetAttribute("FullAuto"),
+   rageConfig:GetAttribute("RapidFire"),rageConfig:GetAttribute("FireRatePercent"))
+  local ok,err=pcall(function()
+   for key,last in pairs(record.Applied) do
+    if desired[key]==nil then
+     if record.Data[key]==last then record.Data[key]=record.Original[key] end
+     record.Applied[key]=nil
+    end
+   end
+   for key,value in pairs(desired) do
+    record.Data[key]=value;record.Applied[key]=value
+   end
+  end)
+  record.Error=not ok and tostring(err) or nil
+ end
+ local function enabled()
+  return alive and rageConfig:GetAttribute("Enabled")==true and not rageConfig:GetAttribute("Observing")
+ end
+ local function inspect(tool)
+  if not tool:IsA("Tool") then return end
+  local module=tool:FindFirstChild("GunStates")
+  if not module or not module:IsA("ModuleScript") or records[module] or pending[module] then return end
+  pending[module]=true
+  task.spawn(function()
+   local ok,data=pcall(require,module)
+   if not alive then return end
+   if not ok or type(data)~="table" then
+    records[module]={Error="No se pudo leer GunStates",Tool=tool};return
+   end
+   local record={Data=data,Tool=tool,Original={Spread=data.Spread,AutoFire=data.AutoFire,FireRate=data.FireRate},Applied={}}
+   records[module]=record;update(record,enabled())
+  end)
+ end
+ local function refreshGuns()
+  local equipped=me.Character and me.Character:FindFirstChildOfClass("Tool")
+  for module,record in pairs(records) do
+   if record.Data then update(record,enabled() and record.Tool.Parent~=nil) end
+   if not module.Parent or not record.Tool.Parent then records[module]=nil;pending[module]=nil end
+  end
+  local backpack=me:FindFirstChildOfClass("Backpack")
+  for _,container in ipairs({backpack or false,me.Character or false}) do
+   if container then for _,tool in ipairs(container:GetChildren()) do inspect(tool) end end
+  end
+  local module=equipped and equipped:FindFirstChild("GunStates")
+  local record=module and records[module]
+  if record and record.Error then gunAdapterStatus="GunStates: no se pudo modificar."
+  elseif record and record.Data then
+   gunAdapterStatus="GunStates: "..equipped.Name..(enabled() and " / ajustes locales activos" or " / valores restaurados")
+  elseif module then gunAdapterStatus="GunStates: leyendo modulo..."
+  else gunAdapterStatus="Equipa un arma con GunStates. Sin conexion al disparo." end
+ end
+ on(rageConfig.AttributeChanged,function(key)
+  if table.find({"Enabled","Observing","NoSpread","FullAuto","RapidFire","FireRatePercent"},key) then refreshGuns() end
+ end)
+ on(R.Heartbeat,function(dt)
+  clock+=dt;if clock>=.4 then clock=0;refreshGuns() end
+ end)
+ on(gui.Destroying,function()
+  for _,record in pairs(records) do if record.Data then update(record,false) end end
+ end)
+ refreshGuns()
+end
+
 local integrationStatus=label(weaponOptions,"Comprobando arma...",9,238,239,60,11,"Muted")
 integrationStatus.TextWrapped=true
 local RS=game:GetService("ReplicatedStorage")
@@ -567,7 +651,7 @@ local hitConnected=false
 on(R.Heartbeat,function()
  local tool=me.Character and me.Character:FindFirstChildOfClass("Tool")
  local ready=RS:GetAttribute("CombatWeaponProtocol")==2 and tool and tool:GetAttribute("CombatWeaponClientReady")
- integrationStatus.Text=ready and "Arma conectada. Modificadores: Studio / propietario privado." or "ARMA NO CONECTADA: los ajustes no controlan esta arma."
+ integrationStatus.Text=ready and "Arma conectada. Modificadores: Studio / propietario privado." or ((RS:FindFirstChild("GunRemotes") and tool and tool:GetAttribute("ToolType")=="Gun") and prisonStatus or gunAdapterStatus)
  local event=RS:FindFirstChild("CombatConfirmedHit")
  if not hitConnected and event and event:IsA("RemoteEvent") then
   hitConnected=true
@@ -612,7 +696,7 @@ activeLabel.TextYAlignment=Enum.TextYAlignment.Top
 activeLabel.TextTruncate=Enum.TextTruncate.None
 local watermark=rect(gui,8,8,365,23,"Background")
 outline(watermark);rect(watermark,0,0,365,1,"Accent")
-local watermarkText=label(watermark,"Combat UI | CONNECTED-1",6,3,353,18,11)
+local watermarkText=label(watermark,"Combat UI | PRISON-2",6,3,353,18,11)
 
 local function activeRows()
 	local rows={}
@@ -886,7 +970,7 @@ R:BindToRenderStep("SimpleCombatHUD",Enum.RenderPriority.Last.Value,function(dt)
 	hudClock=hudClock+dt;fpsClock=fpsClock+dt;frames=frames+1
 	if hudClock>=.1 then refreshHUD();hudClock=0 end
 	if fpsClock>=.5 then
-		watermarkText.Text=string.format("Combat UI | CONNECTED-1 | %s | %d fps",me.Name,math.round(frames/fpsClock))
+		watermarkText.Text=string.format("Combat UI | PRISON-2 | %s | %d fps",me.Name,math.round(frames/fpsClock))
 		fpsClock,frames=0,0
 	end
 end)
@@ -1488,6 +1572,211 @@ local function applyMouseAim(camera,point,alpha)
 	mouseFeedback={Point=point,Cursor=cursor,Requested=Vector2.new(dx,dy),
 		Error=errorVector.Magnitude,Failures=mouseFeedback and mouseFeedback.Point==point and mouseFeedback.Failures or 0}
 	return nil
+end
+
+-- Prison Life attribute/GunRemotes adapter, based on the supplied Hybrid script.
+do
+ local RS=game:GetService("ReplicatedStorage")
+ local originals=setmetatable({},{__mode="k"})
+ local currentTool,currentPlayer,currentPart=nil,nil,nil
+ local acquiredAt,nextShot,nextScan=0,0,0
+ local rayOriginal,rayHook,rayFunction
+ local hookState="Silent: sin comprobar"
+ local running=true
+ local randomChoice,randomOwner
+ local function active()
+  return alive and running and rageConfig:GetAttribute("Enabled") and not observing
+   and not GuiService.MenuIsOpen and not U:GetFocusedTextBox()
+ end
+ local function restore(tool,record)
+  for key,value in pairs(record.Applied) do
+   if tool:GetAttribute(key)==value then tool:SetAttribute(key,record.Original[key]) end
+  end
+  table.clear(record.Applied)
+ end
+ local function modify(tool)
+  local record=originals[tool]
+  if not record then record={Original={},Applied={}};originals[tool]=record end
+  local wanted={}
+  local rate=tool:GetAttribute("FireRate")
+  if type(rate)=="number" and rate>0 then
+   record.Original.FireRate=record.Original.FireRate or rate
+   local multiplier=math.clamp(rageConfig:GetAttribute("FireRatePercent") or 100,25,200)/100
+   if rageConfig:GetAttribute("RapidFire") then multiplier=math.max(2,multiplier) end
+   if multiplier~=1 then wanted.FireRate=math.max(.01,record.Original.FireRate/multiplier) end
+  end
+  if rageConfig:GetAttribute("NoSpread") and type(tool:GetAttribute("Spread"))=="number" then
+   if record.Original.Spread==nil then record.Original.Spread=tool:GetAttribute("Spread") end
+   wanted.Spread=0
+  end
+  if rageConfig:GetAttribute("FullAuto") and type(tool:GetAttribute("AutoFire"))=="boolean" then
+   if record.Original.AutoFire==nil then record.Original.AutoFire=tool:GetAttribute("AutoFire") end
+   wanted.AutoFire=true
+  end
+  for key,value in pairs(record.Applied) do
+   if wanted[key]==nil then
+    if tool:GetAttribute(key)==value then tool:SetAttribute(key,record.Original[key]) end
+    record.Applied[key]=nil
+   end
+  end
+  for key,value in pairs(wanted) do tool:SetAttribute(key,value);record.Applied[key]=value end
+ end
+ local function eligible(p)
+  if not p or p==me or p.Parent~=P or not body(p.Character) then return false end
+  if rageConfig:GetAttribute("TeamCheck") and me.Team and me.Team==p.Team and not me.Neutral and not p.Neutral then return false end
+  return not (rageConfig:GetAttribute("IgnoreProtected") and p.Character:FindFirstChildOfClass("ForceField"))
+ end
+ local function pickPart(p,camera)
+  local names=limbNames[rageConfig:GetAttribute("Hitbox")]
+  if names and not rageConfig:GetAttribute("ClosestPart") then
+   for _,name in ipairs(names) do local found=part(p.Character,name);if found then return found end end
+   return nil
+  end
+  local available={}
+  for _,list in pairs(limbNames) do
+   for _,name in ipairs(list) do local found=part(p.Character,name);if found then table.insert(available,found);break end end
+  end
+  if #available==0 then return nil end
+  if rageConfig:GetAttribute("ClosestPart") then
+   local best,score=nil,math.huge
+   for _,limb in ipairs(available) do
+    local pos,shown=camera:WorldToViewportPoint(limb.Position)
+    local d=(Vector2.new(pos.X,pos.Y)-camera.ViewportSize*.5).Magnitude
+    if shown and d<score then best,score=limb,d end
+   end
+   return best
+  end
+  if randomOwner~=p or not randomChoice or not randomChoice:IsDescendantOf(p.Character) then
+   randomOwner=p;randomChoice=available[math.random(#available)]
+  end
+  return randomChoice
+ end
+ local function clear(p,limb,camera)
+  local params=RaycastParams.new();params.FilterType=Enum.RaycastFilterType.Exclude
+  params.FilterDescendantsInstances={me.Character,camera}
+  local hit=workspace:Raycast(camera.CFrame.Position,limb.Position-camera.CFrame.Position,params)
+  return not hit or hit.Instance:IsDescendantOf(p.Character)
+ end
+ local function candidate(p,camera,manual)
+  if not eligible(p) then return nil end
+  local limb=pickPart(p,camera);if not limb then return nil end
+  local distance=(limb.Position-camera.CFrame.Position).Magnitude
+  if rageConfig:GetAttribute("LimitDistance") and distance>rageConfig:GetAttribute("MaxDistance") then return nil end
+  local screen,shown=camera:WorldToViewportPoint(limb.Position)
+  local score=(Vector2.new(screen.X,screen.Y)-camera.ViewportSize*.5).Magnitude
+  if not manual and not rageConfig:GetAttribute("Aim360") and (not shown or score>rageConfig:GetAttribute("FOV")) then return nil end
+  if rageConfig:GetAttribute("VisibilityCheck") and not clear(p,limb,camera) then return nil end
+  local criterion=rageConfig:GetAttribute("Selection")
+  if criterion=="Distance" then score=distance elseif criterion=="Health" then local h=body(p.Character);score=h.Health end
+  return limb,score
+ end
+ local function acquire(camera)
+  if rageConfig:GetAttribute("Selection")=="Manual" then
+   local p=selectedPlayer();local limb=candidate(p,camera,true)
+   return limb and p or nil,limb
+  end
+  if currentPlayer then
+   local limb=candidate(currentPlayer,camera,true)
+   if limb then return currentPlayer,limb end
+   if not rageConfig:GetAttribute("AutoSwitch") then return nil end
+  end
+  local best,selected,score=nil,nil,math.huge
+  for _,p in ipairs(P:GetPlayers()) do
+   local limb,d=candidate(p,camera,false)
+   if limb and d<score then best,selected,score=p,limb,d end
+  end
+  return best,selected
+ end
+ local function installHook()
+  if rayOriginal or type(hookfunction)~="function" then
+   if not rayOriginal then hookState="Silent: hookfunction no disponible" end
+   return
+  end
+  local found
+  if type(filtergc)=="function" then
+   local ok,result=pcall(filtergc,"function",{Name="castRay"},true)
+   if ok then found=type(result)=="function" and result or type(result)=="table" and result[1] end
+  end
+  if not found and type(getgc)=="function" then
+   local ok,items=pcall(getgc,true)
+   if ok then for _,fn in pairs(items) do
+    if type(fn)=="function" then
+     local success,name=pcall(function()return debug.info(fn,"n")end)
+     if success and name=="castRay" then found=fn;break end
+    end
+   end end
+  end
+  if type(found)~="function" then hookState="Silent: castRay no encontrado";return end
+  rayHook=function(...)
+   if active() and rageConfig:GetAttribute("SilentAim") and (rageConfig:GetAttribute("HitChance") or 0)==0 and currentPart and eligible(currentPlayer)
+    and currentPart:IsDescendantOf(currentPlayer.Character) and os.clock()-acquiredAt>=(rageConfig:GetAttribute("ReactionTime") or 0) then
+    local camera=workspace.CurrentCamera
+    if camera and (not rageConfig:GetAttribute("VisibilityCheck") or clear(currentPlayer,currentPart,camera)) then
+     return currentPart,currentPart.Position
+    end
+   end
+   return rayOriginal(...)
+  end
+  local ok,original=pcall(hookfunction,found,rayHook)
+  if ok and type(original)=="function" then rayOriginal=original;rayFunction=found;hookState="Silent: castRay conectado (sin validar impactos)"
+  else hookState="Silent: no se pudo conectar" end
+ end
+ on(R.RenderStepped,function()
+  if RS:GetAttribute("CombatWeaponProtocol")==2 then return end -- Existing private kit owns its output.
+  local tool=me.Character and me.Character:FindFirstChildOfClass("Tool")
+  local remotes=RS:FindFirstChild("GunRemotes")
+  local shoot=remotes and remotes:FindFirstChild("ShootEvent")
+  local compatible=tool and tool:GetAttribute("ToolType")=="Gun" and shoot and shoot:IsA("RemoteEvent")
+  if not compatible or not active() then
+   for weapon,record in pairs(originals) do if weapon.Parent then restore(weapon,record) end end
+   currentTool,currentPlayer,currentPart=nil,nil,nil
+   prisonStatus=compatible and "Prison Life: detectado / pausado" or "Prison Life: equipa arma ToolType=Gun + GunRemotes"
+   return
+  end
+  if tool~=currentTool then
+   for weapon,record in pairs(originals) do if weapon.Parent then restore(weapon,record) end end
+   currentTool=tool;nextShot=0
+  end
+  modify(tool)
+  local camera=workspace.CurrentCamera;if not camera then return end
+  local p,limb=acquire(camera)
+  if p~=currentPlayer then acquiredAt=os.clock() end
+  local retained=currentPlayer
+  currentPlayer,currentPart=p,limb
+  if not p and retained and not rageConfig:GetAttribute("AutoSwitch") and rageConfig:GetAttribute("Selection")~="Manual" then
+   currentPlayer=retained
+  end
+  prisonStatus="Prison Life: atributos + ShootEvent detectados"
+  if rageConfig:GetAttribute("SilentAim") then
+   if os.clock()>=nextScan then nextScan=os.clock()+5;task.spawn(installHook) end
+   prisonStatus=hookState
+   if (rageConfig:GetAttribute("HitChance") or 0)>0 then prisonStatus="Silent pausado: Hit Chance no estimable; usa 0" end
+  end
+  if not limb or os.clock()-acquiredAt<(rageConfig:GetAttribute("ReactionTime") or 0) then return end
+  local point=limb.Position
+  if rageConfig:GetAttribute("Prediction") then point+=limb.AssemblyLinearVelocity*(rageConfig:GetAttribute("PredictionTime") or 0) end
+  if rageConfig:GetAttribute("Aimbot") and not rageConfig:GetAttribute("SilentAim") then
+   if (point-camera.CFrame.Position).Magnitude>.001 then camera.CFrame=CFrame.lookAt(camera.CFrame.Position,point) end
+  end
+  if not rageConfig:GetAttribute("AutoShoot") or os.clock()<nextShot then return end
+  local ammo=tool:GetAttribute("Local_CurrentAmmo") or tool:GetAttribute("CurrentAmmo")
+  if type(ammo)~="number" or ammo<=0 then prisonStatus="Prison Life: sin municion o atributo desconocido";return end
+  if (rageConfig:GetAttribute("HitChance") or 0)>0 then
+   prisonStatus="Hit Chance: estimacion no disponible para esta arma; usa 0";return
+  end
+  local head=part(me.Character,"Head");if not head then return end
+  local bullets=math.clamp(math.floor(tonumber(tool:GetAttribute("ProjectileCount")) or 1),1,20)
+  local payload={}
+  for i=1,bullets do payload[i]={head.Position,point,limb} end
+  nextShot=os.clock()+math.max(.05,tonumber(tool:GetAttribute("FireRate")) or .12)
+  local ok=pcall(function()shoot:FireServer(payload)end)
+  if ok then tool:SetAttribute("Local_CurrentAmmo",math.max(0,ammo-1)) else prisonStatus="ShootEvent rechazo la llamada local" end
+ end)
+ on(gui.Destroying,function()
+  running=false;currentPart=nil;currentPlayer=nil
+  for weapon,record in pairs(originals) do if weapon.Parent then restore(weapon,record) end end
+  -- The hook becomes a pass-through. Restoring blindly could overwrite another script's hook.
+ end)
 end
 
 -- Aimbot: immediate acquisition with mouse-intent retargeting.
