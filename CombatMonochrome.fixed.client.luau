@@ -54,7 +54,8 @@ local function body(model)
 	local h = model:FindFirstChildWhichIsA("Humanoid",true)
 	local root = part(model,"HumanoidRootPart") or part(model,"UpperTorso")
 		or part(model,"Torso") or model.PrimaryPart or part(model,"Head") or model:FindFirstChildWhichIsA("BasePart",true)
-	if h and h.Health>0 and root and root:IsA("BasePart") then return h,root end
+	if h and h.Health>0 and h:GetState()~=Enum.HumanoidStateType.Dead
+		and root and root:IsA("BasePart") then return h,root end
 end
 local function enemy(p)
 	if not p or p==me or p.Parent~=P or not body(p.Character) then return false end
@@ -1234,11 +1235,19 @@ R:BindToRenderStep("SimpleCombatAim",Enum.RenderPriority.Camera.Value+1,function
 	else stickyTarget=nil; mouseIntent=Vector2.zero
 	end
 	 local aimIssue=nil
+	-- Revalidate immediately before output; never steer toward a dead character.
+	if target and not enemy(target) then
+		target,selected,stickyTarget=nil,nil,nil
+		randomModel,randomPart=nil,nil
+	end
 	if selected and (selected.Position-camera.CFrame.Position).Magnitude>.01 then
 		local alpha=aimAlpha(S.Smooth,S.Lock,manualMove,dt)
 		if S.Center=="Cursor" then
 			aimIssue=applyMouseAim(camera,selected,alpha)
 		else
+			-- Translation/jumping must not introduce smoothing lag off the reticle.
+			-- Deliberate mouse input still receives the reduced assistance above.
+			if not manualMove then alpha=1 end
 			local ray=camera:ViewportPointToRay(center.X,center.Y)
 			local localRay=camera.CFrame:VectorToObjectSpace(ray.Direction)
 			local correction=CFrame.lookAt(Vector3.zero,localRay):Inverse()
