@@ -1,7 +1,7 @@
--- VERSION 3.3: body-based player selection, then independent Head/Torso aiming.
+-- VERSION 3.4: body-based player selection, then independent Head/Torso aiming.
 -- COMBAT UI: siempre selecciona al jugador mas cercano a la mira dentro del FOV.
 -- Target lock ON = apuntado directo; OFF = usa Smoothness.
--- Ninguna opcion conserva un objetivo si otro esta mas cerca.
+-- Sticky OFF: holds the current valid target through jitter; deliberate mouse movement permits retargeting.
 -- Autoplay/Kill all usan una Tool existente; el dano depende del juego.
 
 local P = game:GetService("Players")
@@ -14,11 +14,12 @@ local pg = me:WaitForChild("PlayerGui")
 local old = pg:FindFirstChild("SimpleCombatUI")
 if old then old:Destroy() end
 
-local S = {Enabled=false, Aim=false, Lock=false, FOV=200, Smooth=20,
+local S = {Enabled=false, Aim=false, Lock=false, FOV=200, Smooth=0,
 	Part="Head", Center="Crosshair", Mode=nil, Key=Enum.KeyCode.Q, Sticky=false, TeamCheck=false, Skeleton=false, Tracer=false, Chams=false,
  ThroughWalls=true, Colors={Skeleton=Color3.new(1,1,1),Tracer=Color3.new(1,1,1),Chams=Color3.new(1,1,1)}}
 local binding=false
 local stickyTarget=nil
+local frameMotion,mouseIntent=Vector2.zero,Vector2.zero
 local alive, version, target, botTarget = true, 0, nil, nil
 local controls, driving, refresh = nil, false, nil
 local links, message, messageUntil = {}, "", 0
@@ -43,14 +44,14 @@ local function note(text)
 	message, messageUntil = text, os.clock()+3
 end
 local function part(model, name)
-	local p = model and model:FindFirstChild(name)
+	local p = model and model:FindFirstChild(name,true)
 	return p and p:IsA("BasePart") and p or nil
 end
 local function body(model)
 	if not model or not model:IsDescendantOf(workspace) then return end
-	local h = model:FindFirstChildOfClass("Humanoid")
+	local h = model:FindFirstChildWhichIsA("Humanoid",true)
 	local root = part(model,"HumanoidRootPart") or part(model,"UpperTorso")
-		or part(model,"Torso") or model.PrimaryPart
+		or part(model,"Torso") or model.PrimaryPart or part(model,"Head") or model:FindFirstChildWhichIsA("BasePart",true)
 	if h and h.Health>0 and root and root:IsA("BasePart") then return h,root end
 end
 local function enemy(p)
@@ -59,8 +60,9 @@ local function enemy(p)
 	return true
 end
 local function aimPart(model)
-	if S.Part=="Head" then return part(model,"Head") end
-	return part(model,"UpperTorso") or part(model,"Torso") or part(model,"LowerTorso")
+	local _,root=body(model)
+	if S.Part=="Head" then return part(model,"Head") or root end
+	return part(model,"UpperTorso") or part(model,"Torso") or part(model,"LowerTorso") or root
 end
 local function visible(origin, model)
 	local _,root = body(model)
@@ -117,7 +119,7 @@ local badge=smallButton("+",16,16,34,34)
 badge.Active=false
 badge.AutoButtonColor=false
 txt(panel,"COMBAT",60,12,140,27,22,ink,Enum.Font.GothamBlack)
-txt(panel,"CONTROL PANEL v3.3",61,39,150,12,9,gray)
+txt(panel,"CONTROL PANEL v3.4",61,39,150,12,9,gray)
 local activeCount=smallButton("KEY: Q",254,20,90,26)
 activeCount.Active=true
 activeCount.AutoButtonColor=true
@@ -227,7 +229,8 @@ refresh=function()
 	end
 	partValue.Text=S.Part
 	centerValue.Text=S.Center
-	activeCount.Text=binding and "PRESS A-Z" or ("KEY: "..S.Key.Name)
+	activeCount.Text=binding and "PRESS KEY" or ("KEY: "..S.Key.Name)
+	activeCount.TextSize=#S.Key.Name>7 and 9 or 12
 end
 
 -- ESP page: independent feature colors, shared team filter.
@@ -541,6 +544,7 @@ end
 
 -- Keyboard binding and draggable header.
 local function toggleAim()
+	stickyTarget=nil; mouseIntent=Vector2.zero; frameMotion=Vector2.zero
 	local effective=S.Enabled and (S.Aim or S.Mode~=nil)
 	S.Aim=not effective
 	if S.Aim then S.Enabled=true else target=nil; stopBot() end
@@ -550,7 +554,7 @@ end
 on(activeCount.Activated,function()
 	binding=not binding
 	refresh()
-	note(binding and "Pulsa una letra A-Z. Escape cancela." or "Asignacion cancelada.")
+	note(binding and "Pulsa la tecla que quieras. Escape cancela; mouse no permitido." or "Asignacion cancelada.")
 end)
 local dragHeader=new("Frame",{Position=UDim2.fromOffset(54,6),
 	Size=UDim2.fromOffset(190,50),BackgroundTransparency=1,Active=true,ZIndex=10},panel)
@@ -606,27 +610,33 @@ on(hide.Activated,togglePanel)
 on(open.Activated,togglePanel)
 on(close.Activated,function() gui:Destroy() end)
 on(U.InputBegan,function(input,processed)
-	if U:GetFocusedTextBox() or GuiService.MenuIsOpen then return end
+	if U:GetFocusedTextBox() then return end
 	if binding then
-		-- Mouse buttons can never become the aimbot binding.
 		if input.UserInputType~=Enum.UserInputType.Keyboard then return end
 		if input.KeyCode==Enum.KeyCode.Escape then
-			binding=false
-			note("Asignacion cancelada.")
-		elseif input.KeyCode.Name:match("^[A-Z]$") then
-			S.Key=input.KeyCode
-			binding=false
+			binding=false; note("Asignacion cancelada.")
+		elseif input.KeyCode~=Enum.KeyCode.Unknown then
+			S.Key=input.KeyCode; binding=false
 			note("Tecla del aimbot: "..S.Key.Name)
-		else
-			note("Solo letras A-Z; no se admiten botones del mouse.")
 		end
 		refresh()
 		return
 	end
+	if GuiService.MenuIsOpen then return end
+	-- The custom key has priority over default shortcuts.
+	if input.UserInputType==Enum.UserInputType.Keyboard and input.KeyCode==S.Key then
+		toggleAim(); return
+	end
 	if processed then return end
 	if input.KeyCode==Enum.KeyCode.Backspace then stopAll()
-	elseif input.KeyCode==Enum.KeyCode.RightShift then togglePanel()
-	elseif input.UserInputType==Enum.UserInputType.Keyboard and input.KeyCode==S.Key then toggleAim() end
+	elseif input.KeyCode==Enum.KeyCode.RightShift then togglePanel() end
+end)
+on(U.InputChanged,function(input)
+	if input.UserInputType==Enum.UserInputType.MouseMovement
+		and not binding and not dragInput and not U:GetFocusedTextBox()
+		and not GuiService.MenuIsOpen then
+		frameMotion=frameMotion+Vector2.new(input.Delta.X,input.Delta.Y)
+	end
 end)
 
 on(me.CharacterRemoving,function() target=nil; stickyTarget=nil; stopBot() end)
@@ -645,7 +655,7 @@ local function chooseCandidate(candidates,radius,locked)
 	return best
 end
 
-local function pickClosest(camera,center)
+local function pickClosest(camera,center,intentSwitch)
 	local params=RaycastParams.new()
 	params.FilterType=Enum.RaycastFilterType.Exclude
 	params.FilterDescendantsInstances=me.Character and {me.Character,camera} or {camera}
@@ -677,8 +687,9 @@ local function pickClosest(camera,center)
 				-- Detect the character's visible body area, independently of Head/Torso aim.
 				if p==direct then score=0
 				else
-					for _,limb in ipairs(model:GetChildren()) do
+					for _,limb in ipairs(model:GetDescendants()) do
 						if limb:IsA("BasePart") and limb.Name~="HumanoidRootPart"
+							and not limb:FindFirstAncestorWhichIsA("Accessory") and not limb:FindFirstAncestorWhichIsA("Tool")
 							and limb.Transparency<1 and clearAt(model,limb.Position) then
 							local minX,minY,maxX,maxY=math.huge,math.huge,-math.huge,-math.huge
 							local inFront=true
@@ -706,8 +717,9 @@ local function pickClosest(camera,center)
 			end
 		end
 	end
-	local chosen=chooseCandidate(candidates,S.FOV,S.Sticky and stickyTarget or nil)
-	stickyTarget=S.Sticky and chosen and chosen.Player or nil
+	local keepCurrent=S.Sticky or not intentSwitch
+	local chosen=chooseCandidate(candidates,S.FOV,keepCurrent and stickyTarget or nil)
+	stickyTarget=chosen and chosen.Player or nil
 	if chosen then
 		-- Head/Torso is resolved ONLY AFTER selecting the player.
 		-- An unavailable or blocked aim part never substitutes a different player.
@@ -729,6 +741,12 @@ R:BindToRenderStep("SimpleCombatAim",Enum.RenderPriority.Camera.Value+1,function
 	if not alive or not camera then return end
 	scale.Scale=math.max(.3,math.min(1,
 		(camera.ViewportSize.Y-70)/428,(camera.ViewportSize.X-40)/430))
+	local currentMotion=frameMotion
+	frameMotion=Vector2.zero
+	mouseIntent=mouseIntent+currentMotion
+	local manualMove=not S.Sticky and currentMotion.Magnitude>.15
+	local intentSwitch=not S.Sticky and mouseIntent.Magnitude>=8
+	if intentSwitch then mouseIntent=Vector2.zero end
 	local center=S.Center=="Cursor" and U:GetMouseLocation() or camera.ViewportSize*.5
 	circle.Position=UDim2.fromOffset(center.X,center.Y)
 	circle.Size=UDim2.fromOffset(S.FOV*2,S.FOV*2)
@@ -737,10 +755,10 @@ R:BindToRenderStep("SimpleCombatAim",Enum.RenderPriority.Camera.Value+1,function
 	target=nil
 	if S.Enabled and (S.Aim or S.Mode~=nil) and body(me.Character)
 		and not binding and not dragInput and not GuiService.MenuIsOpen and not U:GetFocusedTextBox() then
-		target,selected=pickClosest(camera,center)
-	else stickyTarget=nil
+		target,selected=pickClosest(camera,center,intentSwitch)
+	else stickyTarget=nil; mouseIntent=Vector2.zero
 	end
-	 if selected and (selected.Position-camera.CFrame.Position).Magnitude>.01 then
+	 if selected and not manualMove and (selected.Position-camera.CFrame.Position).Magnitude>.01 then
 		local ray=camera:ViewportPointToRay(center.X,center.Y)
 		local localRay=camera.CFrame:VectorToObjectSpace(ray.Direction)
 		local correction=CFrame.lookAt(Vector3.zero,localRay):Inverse()
