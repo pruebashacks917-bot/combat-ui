@@ -1,3 +1,4 @@
+-- VERSION 3.2: body-based player selection, then independent Head/Torso aiming.
 -- COMBAT UI: siempre selecciona al jugador mas cercano a la mira dentro del FOV.
 -- Target lock ON = apuntado directo; OFF = usa Smoothness.
 -- Ninguna opcion conserva un objetivo si otro esta mas cerca.
@@ -113,7 +114,7 @@ local badge=smallButton("+",16,16,34,34)
 badge.Active=false
 badge.AutoButtonColor=false
 txt(panel,"COMBAT",60,12,140,27,22,ink,Enum.Font.GothamBlack)
-txt(panel,"CONTROL PANEL",61,39,150,12,9,gray)
+txt(panel,"CONTROL PANEL v3.2",61,39,150,12,9,gray)
 local activeCount=smallButton("KEY: Q",254,20,90,26)
 activeCount.Active=true
 activeCount.AutoButtonColor=true
@@ -503,8 +504,7 @@ local function pickClosest(camera,center)
 	for _,p in ipairs(P:GetPlayers()) do
 		if enemy(p) then
 			local model=p.Character
-			local requested=aimPart(model)
-			if requested then
+			do
 				local _,root=body(model)
 				local score=math.huge
 				-- Detect the character's visible body area, independently of Head/Torso aim.
@@ -533,10 +533,7 @@ local function pickClosest(camera,center)
 					end
 				end
 				if score<=S.FOV then
-					local screen=camera:WorldToViewportPoint(requested.Position)
-					local point=nil
-					if screen.Z>0 and clearAt(model,requested.Position) then point=requested end
-					table.insert(candidates,{Player=p,Point=point,Score=score,
+					table.insert(candidates,{Player=p,Score=score,
 						Depth=(root.Position-origin).Magnitude,Visible=true,Direct=p==direct})
 				end
 			end
@@ -544,7 +541,17 @@ local function pickClosest(camera,center)
 	end
 	local chosen=chooseCandidate(candidates,S.FOV,S.Sticky and stickyTarget or nil)
 	stickyTarget=S.Sticky and chosen and chosen.Player or nil
-	if chosen then return chosen.Player,chosen.Point,chosen.Score end
+	if chosen then
+		-- Head/Torso is resolved ONLY AFTER selecting the player.
+		-- An unavailable or blocked aim part never substitutes a different player.
+		local requested=aimPart(chosen.Player.Character)
+		local point=nil
+		if requested then
+			local screen=camera:WorldToViewportPoint(requested.Position)
+			if screen.Z>0 and clearAt(chosen.Player.Character,requested.Position) then point=requested end
+		end
+		return chosen.Player,point,chosen.Score
+	end
 	return nil,nil,nil
 end
 
