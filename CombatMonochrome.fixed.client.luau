@@ -1,4 +1,4 @@
--- VERSION 4.0: body-based player selection, then independent Head/Torso aiming.
+-- VERSION 4.1: body-based player selection, then independent Head/Torso aiming.
 -- COMBAT UI: siempre selecciona al jugador mas cercano a la mira dentro del FOV.
 -- Target lock ON = apuntado directo; OFF = usa Smoothness.
 -- Sticky OFF: holds the current valid target through jitter; deliberate mouse movement permits retargeting.
@@ -60,10 +60,37 @@ local function enemy(p)
 	if S.TeamCheck and not me.Neutral and not p.Neutral and me.Team and p.Team==me.Team then return false end
 	return true
 end
+local aimParts={"Head","Torso","Left Arm","Right Arm","Left Leg","Right Leg","Random"}
+local randomModel,randomPart
+local limbNames={
+    ["Head"]={"Head"}, ["Torso"]={"UpperTorso","Torso","LowerTorso"},
+    ["Left Arm"]={"LeftUpperArm","Left Arm","LeftLowerArm","LeftHand"},
+    ["Right Arm"]={"RightUpperArm","Right Arm","RightLowerArm","RightHand"},
+    ["Left Leg"]={"LeftUpperLeg","Left Leg","LeftLowerLeg","LeftFoot"},
+    ["Right Leg"]={"RightUpperLeg","Right Leg","RightLowerLeg","RightFoot"}}
 local function aimPart(model)
-	local _,root=body(model)
-	if S.Part=="Head" then return part(model,"Head") or root end
-	return part(model,"UpperTorso") or part(model,"Torso") or part(model,"LowerTorso") or root
+    local _,root=body(model)
+    if not root then return nil end
+    local choice=S.Part
+    if choice=="Random" then
+        if randomModel~=model or not randomPart or not randomPart:IsDescendantOf(model) then
+            local available={}
+            for _,name in ipairs(aimParts) do
+                for _,limb in ipairs(limbNames[name] or {}) do
+                    local found=part(model,limb)
+                    if found then table.insert(available,found);break end
+                end
+            end
+            randomModel=model
+            randomPart=#available>0 and available[math.random(#available)] or root
+        end
+        return randomPart
+    end
+    for _,name in ipairs(limbNames[choice] or {}) do
+        local found=part(model,name)
+        if found then return found end
+    end
+    return root
 end
 local function visible(origin, model)
 	local _,root = body(model)
@@ -87,7 +114,7 @@ task.spawn(function()
 	end
 end)
 
--- UI v4.0: reference-inspired monospace tabs.
+-- UI v4.1: reference-inspired monospace tabs.
 local Http=game:GetService("HttpService")
 local UI={Tab="Aimbot",MenuKey=Enum.KeyCode.RightShift,DisableMovement=false,
 	Indicators=true,IndicatorX=1,IndicatorY=35,Watermark=true,WatermarkPosition="Top left",
@@ -131,7 +158,7 @@ panel.AnchorPoint=Vector2.new(0,.5)
 panel.Position=UDim2.new(0,24,.5,0)
 outline(panel)
 local scale=new("UIScale",{},panel)
-local title=label(panel,"Combat UI | v4.0",9,4,410,19,12)
+local title=label(panel,"Combat UI | v4.1",9,4,410,19,12)
 rect(panel,7,27,546,2,"Accent")
 local function button(parent,text,x,y,w,h,fn)
 	local b=theme(new("TextButton",{Text=text,Position=UDim2.fromOffset(x,y),
@@ -274,7 +301,7 @@ label(a,"Toggle key",9,110,100,20)
 local activeCount=button(a,"[Q]",130,110,118,20)
 buttons.Center=cycle(a,"Aim mode",9,140,239,{"Camera","Mouse"},
 	function()return S.Center=="Cursor" and "Mouse" or "Camera" end,function()end)
-buttons.Part=cycle(a,"Target part",9,181,239,{"Head","Torso"},function()return S.Part end,function()end)
+buttons.Part=cycle(a,"Target part",9,181,239,aimParts,function()return S.Part end,function()end)
 local b=group(pages.Aimbot,"Automation",276,13,258,157)
 local auto=check(b,"Autoplay",8,12,240,function()return S.Mode=="Auto" end,function()end)
 local kill=check(b,"Kill all / one pass",8,35,240,function()return S.Mode=="All" end,function()end)
@@ -287,8 +314,8 @@ number(c,"Smoothness",9,58,239,function()return S.Smooth end,function(v)S.Smooth
 check(c,"Team check",8,106,240,function()return S.TeamCheck end,
 	function(v)S.TeamCheck=v;stickyTarget=nil;target=nil end)
 local d=group(pages.Aimbot,"Information",276,191,258,126)
-label(d,"Nearest visible player first.",9,13,239,18,11,"Muted")
-label(d,"Head / Torso is independent.",9,34,239,18,11,"Muted")
+label(d,"Stable lock; strong mouse to switch.",9,13,239,18,11,"Muted")
+label(d,"Target part is independent.",9,34,239,18,11,"Muted")
 label(d,"Mouse mode needs a free cursor.",9,55,239,18,11,"Muted")
 label(d,"Drag the title bar to move.",9,87,239,18,11,"Muted")
 
@@ -373,7 +400,7 @@ local storageLabel=label(configGroup,"Session storage",9,193,239,17,11,"Muted")
 local credits=group(pages.Settings,"Credits",276,552,258,104)
 label(credits,"Combat UI - custom build",9,15,239,18)
 label(credits,"UI inspired by your references.",9,40,239,18,11,"Muted")
-label(credits,"v4.0 / client-side interface",9,68,239,18,11,"Muted")
+label(credits,"v4.1 / client-side interface",9,68,239,18,11,"Muted")
 local help=group(pages.Settings,"Controls",4,630,258,146)
 label(help,"Mouse buttons cannot be keybinds.",9,14,239,18,11,"Muted")
 label(help,"Escape cancels key assignment.",9,36,239,18,11,"Muted")
@@ -390,7 +417,7 @@ activeLabel.TextYAlignment=Enum.TextYAlignment.Top
 activeLabel.TextTruncate=Enum.TextTruncate.None
 local watermark=rect(gui,8,8,365,23,"Background")
 outline(watermark);rect(watermark,0,0,365,1,"Accent")
-local watermarkText=label(watermark,"Combat UI | v4.0",6,3,353,18,11)
+local watermarkText=label(watermark,"Combat UI | v4.1",6,3,353,18,11)
 
 local function activeRows()
 	local rows={}
@@ -486,7 +513,7 @@ local function decodeConfig(data)
 		assert(type(value)=="number" and value==value and math.abs(value)<math.huge,"Invalid number")
 		clean.State[key]=math.clamp(math.round(value),limits[1],limits[2])
 	end
-	assert(data.State.Part=="Head" or data.State.Part=="Torso","Invalid target part")
+	assert(table.find(aimParts,data.State.Part)~=nil,"Invalid target part")
 	assert(data.State.Center=="Crosshair" or data.State.Center=="Cursor","Invalid aim mode")
 	clean.State.Part,clean.State.Center=data.State.Part,data.State.Center
 	clean.State.Key=assert(keyboardKey(data.State.Key),"Invalid aimbot key")
@@ -660,7 +687,7 @@ R:BindToRenderStep("SimpleCombatHUD",Enum.RenderPriority.Last.Value,function(dt)
 	hudClock=hudClock+dt;fpsClock=fpsClock+dt;frames=frames+1
 	if hudClock>=.1 then refreshHUD();hudClock=0 end
 	if fpsClock>=.5 then
-		watermarkText.Text=string.format("Combat UI | v4.0 | %s | %d fps",me.Name,math.round(frames/fpsClock))
+		watermarkText.Text=string.format("Combat UI | v4.1 | %s | %d fps",me.Name,math.round(frames/fpsClock))
 		fpsClock,frames=0,0
 	end
 end)
@@ -997,7 +1024,7 @@ end)
 on(buttons.Aim.Activated,toggleAim)
 on(buttons.Lock.Activated,function() S.Lock=not S.Lock; refresh() end)
 on(buttons.Part.Activated,function()
-	S.Part=S.Part=="Head" and "Torso" or "Head"; refresh()
+	S.Part=aimParts[(table.find(aimParts,S.Part) or 1)%#aimParts+1];randomModel=nil;randomPart=nil;refresh()
 end)
 on(buttons.Center.Activated,function()
 	S.Center=S.Center=="Crosshair" and "Cursor" or "Crosshair"; refresh()
@@ -1190,9 +1217,9 @@ R:BindToRenderStep("SimpleCombatAim",Enum.RenderPriority.Camera.Value+1,function
     end
     local currentMotion=frameMotion
 	frameMotion=Vector2.zero
-	mouseIntent=mouseIntent+currentMotion
-	local manualMove=not S.Sticky and currentMotion.Magnitude>.15
-	local intentSwitch=not S.Sticky and mouseIntent.Magnitude>=8
+	mouseIntent=mouseIntent*math.exp(-dt/0.08)+currentMotion
+	local manualMove=not S.Sticky and mouseIntent.Magnitude>=100
+	local intentSwitch=manualMove
 	if intentSwitch then mouseIntent=Vector2.zero end
 	local center=S.Center=="Cursor" and U:GetMouseLocation() or camera.ViewportSize*.5
 	circle.Position=UDim2.fromOffset(center.X,center.Y)
@@ -1207,7 +1234,7 @@ R:BindToRenderStep("SimpleCombatAim",Enum.RenderPriority.Camera.Value+1,function
 	end
 	 local aimIssue=nil
 	if selected and (selected.Position-camera.CFrame.Position).Magnitude>.01 then
-		local alpha=aimAlpha(S.Smooth,S.Lock,manualMove,dt)
+		local alpha=manualMove and aimAlpha(S.Smooth,S.Lock,true,dt) or 1
 		if S.Center=="Cursor" then
 			aimIssue=applyMouseAim(camera,selected,alpha)
 		else
