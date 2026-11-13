@@ -455,15 +455,10 @@ cycle(rageRight,"Hitbox Selection",9,155,239,aimParts,
 number(rageRight,"Prediction time (s)",9,210,239,function()return rageConfig:GetAttribute("PredictionTime")end,
  function(v)rageConfig:SetAttribute("PredictionTime",v)end,0,.25)
 local targetBinding=false
-local targetPick=false
 local targetControls=group(pages["Rage Bot"],"OBJETIVO",4,13,530,200)
 local observing=false
 local observedCamera,previousSubject
-button(targetControls,"Seleccionar objetivo",9,16,250,25,function()
- targetPick=true;targetBinding=false;binding=false;menuBinding=false
- panel.Visible=false;open.Visible=true;syncMenuControls(true)
- note("Haz clic en el jugador. Escape cancela.")
-end)
+label(targetControls,"Target Selection: solo la tecla",9,16,260,25)
 label(targetControls,"Asignar tecla",274,16,130,25)
 local selectKeyButton=button(targetControls,"[T]",408,16,109,25,function()
  targetBinding=not targetBinding;binding=false;menuBinding=false
@@ -500,11 +495,10 @@ local function selectRageTarget(p)
  if not p or p==me or p.Parent~=P then return end
  rageConfig:SetAttribute("SelectedUserId",p.UserId)
  rageConfig:SetAttribute("Selection","Manual")
- rageConfig:SetAttribute("Enabled",true)
- S.Aim=false;heldAim=false;target=nil;stickyTarget=nil;stopBot();refresh()
- note("Objetivo: "..p.Name..". Rage activado con tus opciones actuales.")
+ refresh()
+ note("Objetivo: "..p.Name..". Seleccionado sin cambiar la activacion.")
 end
-label(targetControls,"Mouse sobre jugador + tecla: selecciona y activa Rage.",9,119,508,22,11,"Muted")
+label(targetControls,"Mouse sobre jugador + tecla: selecciona sin hacer clic.",9,119,508,22,11,"Muted")
 label(targetControls,"Funciones del arma: requieren la integracion instalada.",9,152,508,27,11,"Muted")
 local serverGroup=group(pages["Rage Bot"],"JUGADORES DEL SERVIDOR",4,231,530,180)
 local serverList=new("ScrollingFrame",{Position=UDim2.fromOffset(8,14),Size=UDim2.fromOffset(514,156),
@@ -1247,18 +1241,20 @@ end
 on(U.InputBegan,function(input,processed)
     if input.KeyCode==Enum.KeyCode.Escape then
         closeDropdown()
-        targetBinding=false;targetPick=false;endObserve()
+        targetBinding=false;endObserve()
         binding=false;menuBinding=false;heldAim=false;S.Aim=false;stopAll();refresh();return
     end
     if U:GetFocusedTextBox() then return end
     if targetBinding then
         if input.UserInputType==Enum.UserInputType.Keyboard and input.KeyCode~=Enum.KeyCode.Unknown then
+            if input.KeyCode==S.Key or input.KeyCode==UI.MenuKey or input.KeyCode==Enum.KeyCode.Backspace then
+                note("Elige otra tecla: esa activa Aimbot, el menu o Stop All.");return
+            end
             rageConfig:SetAttribute("TargetKey",input.KeyCode.Name);targetBinding=false
         end
         return
     end
-    if ((targetPick and input.UserInputType==Enum.UserInputType.MouseButton1)
-        or (input.UserInputType==Enum.UserInputType.Keyboard and input.KeyCode.Name==rageConfig:GetAttribute("TargetKey")))
+    if input.UserInputType==Enum.UserInputType.Keyboard and input.KeyCode.Name==rageConfig:GetAttribute("TargetKey")
         and not binding and not menuBinding and not GuiService.MenuIsOpen then
         local hit=me:GetMouse().Target
         local chosen=nil
@@ -1271,7 +1267,6 @@ on(U.InputBegan,function(input,processed)
                 note("Team Check excluye a ese jugador.");return
             end
             selectRageTarget(chosen)
-            if targetPick then targetPick=false;panel.Visible=true;open.Visible=false;syncMenuControls(true) end
             rageConfig:SetAttribute("Selection","Manual")
             note("Objetivo seleccionado: "..chosen.Name);refresh()
         else note("Pon el mouse directamente sobre un jugador vivo.") end
@@ -1279,12 +1274,16 @@ on(U.InputBegan,function(input,processed)
     end
     if menuBinding then
         if input.UserInputType==Enum.UserInputType.Keyboard and input.KeyCode~=Enum.KeyCode.Unknown then
+            if input.KeyCode.Name==rageConfig:GetAttribute("TargetKey") then note("Esa tecla pertenece a Target Selection.");return end
             UI.MenuKey=input.KeyCode;menuBinding=false;refresh()
         end
         return
     end
     if binding then
         local kind=input.UserInputType
+        if kind==Enum.UserInputType.Keyboard and input.KeyCode.Name==rageConfig:GetAttribute("TargetKey") then
+            note("Esa tecla pertenece a Target Selection. Elige otra.");return
+        end
         if kind==Enum.UserInputType.Keyboard and input.KeyCode~=Enum.KeyCode.Unknown then S.Key=input.KeyCode
         elseif kind==Enum.UserInputType.MouseButton1 or kind==Enum.UserInputType.MouseButton2 or kind==Enum.UserInputType.MouseButton3 then S.Key=kind
         else return end
