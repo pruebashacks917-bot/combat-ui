@@ -1,4 +1,4 @@
--- VERSION 3.2: body-based player selection, then independent Head/Torso aiming.
+-- VERSION 3.3: body-based player selection, then independent Head/Torso aiming.
 -- COMBAT UI: siempre selecciona al jugador mas cercano a la mira dentro del FOV.
 -- Target lock ON = apuntado directo; OFF = usa Smoothness.
 -- Ninguna opcion conserva un objetivo si otro esta mas cerca.
@@ -15,7 +15,8 @@ local old = pg:FindFirstChild("SimpleCombatUI")
 if old then old:Destroy() end
 
 local S = {Enabled=false, Aim=false, Lock=false, FOV=200, Smooth=20,
-	Part="Head", Center="Crosshair", Mode=nil, Key=Enum.KeyCode.Q, Sticky=false}
+	Part="Head", Center="Crosshair", Mode=nil, Key=Enum.KeyCode.Q, Sticky=false, TeamCheck=false, Skeleton=false, Tracer=false, Chams=false,
+ ThroughWalls=true, Colors={Skeleton=Color3.new(1,1,1),Tracer=Color3.new(1,1,1),Chams=Color3.new(1,1,1)}}
 local binding=false
 local stickyTarget=nil
 local alive, version, target, botTarget = true, 0, nil, nil
@@ -53,7 +54,9 @@ local function body(model)
 	if h and h.Health>0 and root and root:IsA("BasePart") then return h,root end
 end
 local function enemy(p)
-	return p and p~=me and p.Parent==P and body(p.Character)~=nil
+	if not p or p==me or p.Parent~=P or not body(p.Character) then return false end
+	if S.TeamCheck and not me.Neutral and not p.Neutral and me.Team and p.Team==me.Team then return false end
+	return true
 end
 local function aimPart(model)
 	if S.Part=="Head" then return part(model,"Head") end
@@ -114,7 +117,7 @@ local badge=smallButton("+",16,16,34,34)
 badge.Active=false
 badge.AutoButtonColor=false
 txt(panel,"COMBAT",60,12,140,27,22,ink,Enum.Font.GothamBlack)
-txt(panel,"CONTROL PANEL v3.2",61,39,150,12,9,gray)
+txt(panel,"CONTROL PANEL v3.3",61,39,150,12,9,gray)
 local activeCount=smallButton("KEY: Q",254,20,90,26)
 activeCount.Active=true
 activeCount.AutoButtonColor=true
@@ -226,6 +229,170 @@ refresh=function()
 	centerValue.Text=S.Center
 	activeCount.Text=binding and "PRESS A-Z" or ("KEY: "..S.Key.Name)
 end
+
+-- ESP page: independent feature colors, shared team filter.
+local combatWidgets={}
+for _,item in ipairs(panel:GetChildren()) do
+	if item:IsA("GuiObject") and item.Position.Y.Offset>=97 and item.Position.Y.Offset<360 then
+		table.insert(combatWidgets,item)
+	end
+end
+local espTab=smallButton("ESP >",334,74,80,18)
+local espPage=new("Frame",{Name="ESPPage",Position=UDim2.fromOffset(16,97),
+	Size=UDim2.fromOffset(398,262),BackgroundTransparency=1,Visible=false},panel)
+local espButtons,colorBoxes={},{}
+local function espToggle(key,title,x,y,w,h)
+	local b=smallButton(title..": OFF",x,y,w,h,espPage)
+	espButtons[key]={Button=b,Title=title}
+	on(b.Activated,function()
+		S[key]=not S[key]
+		if (key=="Skeleton" or key=="Tracer" or key=="Chams") and S[key] then S.Enabled=true end
+		if key=="TeamCheck" then stickyTarget=nil; target=nil end
+		refresh()
+	end)
+	return b
+end
+local function colorText(color)
+	return string.format("%02X%02X%02X",math.floor(color.R*255+.5),
+		math.floor(color.G*255+.5),math.floor(color.B*255+.5))
+end
+for i,entry in ipairs({{"Skeleton","Skeleton"},{"Tracer","Tracer"},{"Chams","Chams"}}) do
+	local key,title=entry[1],entry[2]
+	local y=(i-1)*54
+	espToggle(key,title,0,y,230,44)
+	local box=new("TextBox",{Text="#"..colorText(S.Colors[key]),
+		Position=UDim2.fromOffset(242,y),Size=UDim2.fromOffset(156,44),
+		BackgroundColor3=S.Colors[key],TextColor3=ink,BorderSizePixel=0,
+		Font=Enum.Font.GothamBold,TextSize=13,ClearTextOnFocus=false},espPage)
+	round(box,10)
+	new("UIStroke",{Color=ink,Thickness=1},box)
+	colorBoxes[key]=box
+	on(box.FocusLost,function()
+		local hex=box.Text:gsub("%s",""):gsub("^#","")
+		if #hex==6 and hex:match("^%x+$") then
+			S.Colors[key]=Color3.fromRGB(tonumber(hex:sub(1,2),16),
+				tonumber(hex:sub(3,4),16),tonumber(hex:sub(5,6),16))
+		else note("Color: usa 6 digitos HEX, ejemplo FF4040.") end
+		refresh()
+	end)
+end
+espToggle("TeamCheck","Team Check",0,168,194,40)
+espToggle("ThroughWalls","ESP walls",204,168,194,40)
+txt(espPage,"Color HEX: FF4040 rojo / 00DDFF cyan / FFFFFF blanco",0,219,398,18,10,gray)
+txt(espPage,"Team Check se aplica a ESP, aimbot y autoplay.",0,240,398,18,10,gray)
+on(espTab.Activated,function()
+	espPage.Visible=not espPage.Visible
+	for _,item in ipairs(combatWidgets) do item.Visible=not espPage.Visible end
+	espTab.Text=espPage.Visible and "< COMBAT" or "ESP >"
+end)
+local refreshCombat=refresh
+refresh=function()
+	refreshCombat()
+	for key,entry in pairs(espButtons) do
+		entry.Button.Text=entry.Title..(S[key] and ": ON" or ": OFF")
+		entry.Button.BackgroundColor3=S[key] and ink or Color3.fromRGB(218,218,213)
+		entry.Button.TextColor3=S[key] and paper or ink
+	end
+	for key,box in pairs(colorBoxes) do
+		local color=S.Colors[key]
+		box.Text="#"..colorText(color)
+		box.BackgroundColor3=color
+		box.TextColor3=(color.R*.299+color.G*.587+color.B*.114)>.55 and ink or paper
+	end
+end
+
+local espWorld=new("Folder",{Name="CombatLocalESP"},workspace)
+local espRecords={}
+local bonePairs={
+	{"Head","UpperTorso"},{"UpperTorso","LowerTorso"},
+	{"UpperTorso","LeftUpperArm"},{"LeftUpperArm","LeftLowerArm"},{"LeftLowerArm","LeftHand"},
+	{"UpperTorso","RightUpperArm"},{"RightUpperArm","RightLowerArm"},{"RightLowerArm","RightHand"},
+	{"LowerTorso","LeftUpperLeg"},{"LeftUpperLeg","LeftLowerLeg"},{"LeftLowerLeg","LeftFoot"},
+	{"LowerTorso","RightUpperLeg"},{"RightUpperLeg","RightLowerLeg"},{"RightLowerLeg","RightFoot"},
+	{"Head","Torso"},{"Torso","Left Arm"},{"Torso","Right Arm"},{"Torso","Left Leg"},{"Torso","Right Leg"}
+}
+local function espRecord(p)
+	local record=espRecords[p]
+	if record then return record end
+	local container=new("Frame",{Name="ESP_"..p.UserId,Size=UDim2.fromScale(1,1),
+		BackgroundTransparency=1,Visible=false},overlay)
+	record={Container=container,Lines={}}
+	for i=1,#bonePairs+1 do
+		record.Lines[i]=new("Frame",{AnchorPoint=Vector2.new(.5,.5),
+			BorderSizePixel=0,Visible=false},container)
+	end
+	record.Highlight=new("Highlight",{Name="ESP_"..p.UserId,Enabled=false,
+		FillTransparency=.6,OutlineTransparency=0},espWorld)
+	espRecords[p]=record
+	return record
+end
+local function removeESP(p)
+	local record=espRecords[p]
+	if record then
+		record.Highlight:Destroy()
+		record.Container:Destroy()
+		espRecords[p]=nil
+	end
+end
+on(P.PlayerRemoving,removeESP)
+local function drawLine(frame,a,b,color)
+	local delta=b-a
+	if delta.Magnitude<.1 then frame.Visible=false; return end
+	frame.Position=UDim2.fromOffset((a.X+b.X)*.5,(a.Y+b.Y)*.5)
+	frame.Size=UDim2.fromOffset(delta.Magnitude,1.5)
+	frame.Rotation=math.deg(math.atan2(delta.Y,delta.X))
+	frame.BackgroundColor3=color
+	frame.Visible=true
+end
+local function project(camera,position)
+	local point=camera:WorldToViewportPoint(position)
+	if point.Z<=.05 then return nil end
+	return Vector2.new(point.X,point.Y)
+end
+R:BindToRenderStep("SimpleCombatESP",Enum.RenderPriority.Camera.Value+2,function()
+	local camera=workspace.CurrentCamera
+	if not camera or not alive then return end
+	for _,record in pairs(espRecords) do
+		record.Container.Visible=false
+		record.Highlight.Enabled=false
+	end
+	if not S.Enabled or not (S.Skeleton or S.Tracer or S.Chams) then return end
+	for _,p in ipairs(P:GetPlayers()) do
+		if enemy(p) then
+			local model=p.Character
+			local _,root=body(model)
+			local record=espRecord(p)
+			record.Highlight.Adornee=model
+			record.Highlight.Enabled=S.Chams
+			record.Highlight.DepthMode=S.ThroughWalls and Enum.HighlightDepthMode.AlwaysOnTop
+				or Enum.HighlightDepthMode.Occluded
+			record.Highlight.FillColor=S.Colors.Chams
+			record.Highlight.OutlineColor=S.Colors.Chams
+			local canDraw=S.ThroughWalls or visible(camera.CFrame.Position,model)
+			if canDraw then
+				record.Container.Visible=true
+				for _,line in ipairs(record.Lines) do line.Visible=false end
+				if S.Skeleton then
+					for i,pair in ipairs(bonePairs) do
+						local first,second=part(model,pair[1]),part(model,pair[2])
+						if first and second then
+							local a,b=project(camera,first.Position),project(camera,second.Position)
+							if a and b then drawLine(record.Lines[i],a,b,S.Colors.Skeleton) end
+						end
+					end
+				end
+				if S.Tracer then
+					local endpoint=project(camera,root.Position)
+					if endpoint then
+						drawLine(record.Lines[#bonePairs+1],
+							Vector2.new(camera.ViewportSize.X*.5,camera.ViewportSize.Y-16),
+							endpoint,S.Colors.Tracer)
+					end
+				end
+			end
+		end
+	end
+end)
 
 -- Movement
 
@@ -597,6 +764,8 @@ on(gui.Destroying,function()
 	alive,S.Enabled=false,false
 	stopBot()
 	R:UnbindFromRenderStep("SimpleCombatAim")
+	R:UnbindFromRenderStep("SimpleCombatESP")
+	espWorld:Destroy()
 	for _,c in ipairs(links) do c:Disconnect() end
 	overlay:Destroy()
 end)
