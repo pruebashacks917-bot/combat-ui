@@ -162,7 +162,7 @@ panel.AnchorPoint=Vector2.new(0,.5)
 panel.Position=UDim2.new(0,24,.5,0)
 outline(panel)
 local scale=new("UIScale",{},panel)
-local title=label(panel,"Combat UI | PRISON-6",9,4,410,19,12)
+local title=label(panel,"Combat UI | PRISON-7",9,4,410,19,12)
 rect(panel,7,27,546,2,"Accent")
 local function button(parent,text,x,y,w,h,fn)
 	local b=theme(new("TextButton",{Text=text,Position=UDim2.fromOffset(x,y),
@@ -302,7 +302,7 @@ local function applyTheme()
 	panel.BackgroundTransparency=UI.MenuAlpha
 end
 
-for i,name in ipairs({"Aimbot","ESP","Rage Bot","Settings"}) do
+for i,name in ipairs({"Aimbot","ESP","Rage Bot","Settings","Armas"}) do
 	local page=new("ScrollingFrame",{Name=name,Position=UDim2.fromOffset(9,62),
 		Size=UDim2.fromOffset(542,510),BackgroundTransparency=1,BorderSizePixel=0,
 		ScrollBarThickness=3,CanvasSize=UDim2.fromOffset(0,name=="Settings" and 824 or name=="Rage Bot" and 1540 or 510),
@@ -552,43 +552,34 @@ check(rageRight,"TP al objetivo",8,266,240,function()return rageConfig:GetAttrib
 check(rageRight,"Copia local controlable",8,294,240,function()return rageConfig:GetAttribute("Visualize")end,function(v)rageConfig:SetAttribute("Visualize",v)end)
 label(rageRight,"Copia local: WASD + Espacio.",9,334,239,30,11,"Muted")
 do
- local getting=false
- button(rageRight,"Conseguir Remington 870",9,383,239,26,function()
-  if getting then return end
-  local h,root=body(me.Character);if not root then note("Personaje no disponible.");return end
+ local gunGroup=group(pages.Armas,"Conseguir armas",4,13,530,215)
+ local busy=false
+ local weaponStatus=label(gunGroup,"Pide el arma sin mover tu personaje.",9,162,508,36,12,"Muted")
+ weaponStatus.TextWrapped=true
+ local function requestGun(name)
+  if busy then return end
   local items=workspace:FindFirstChild("Prison_ITEMS")
   local giver=items and items:FindFirstChild("giver")
-  local gun=giver and giver:FindFirstChild("Remington 870")
-  local pickup=gun and gun:FindFirstChild("ITEMPICKUP")
-  local remoteFolder=workspace:FindFirstChild("Remote")
-  local remote=remoteFolder and remoteFolder:FindFirstChild("ItemHandler")
-  if not pickup or not pickup:IsA("BasePart") or not remote or not remote:IsA("RemoteFunction") then note("No se encontro el pickup o ItemHandler.");return end
-  -- Stop before taking the return snapshot, so it is the user's controlled position.
-  local proxyRoot=rageGhost and rageGhost:FindFirstChild("HumanoidRootPart")
-  local returnPosition=proxyRoot and proxyRoot.CFrame or root.CFrame
-  rageConfig:SetAttribute("Enabled",false);endObserve()
-  task.defer(function()
-   local _,currentRoot=body(me.Character);if not currentRoot then return end
-   local character=me.Character;local saved=returnPosition;getting=true
-   local returned=false
-   local function back()
-    if returned then return end;returned=true
-    if me.Character==character and currentRoot.Parent then currentRoot.CFrame=saved;currentRoot.AssemblyLinearVelocity=Vector3.zero end
-    getting=false
-   end
-   task.delay(3,back)
-   local ok=pcall(function()
-    currentRoot.CFrame=pickup.CFrame*CFrame.new(0,3,0)
-    task.wait(.15);remote:InvokeServer(pickup)
-   end)
-   back()
+  local model=giver and giver:FindFirstChild(name)
+  local pickup=model and model:FindFirstChild("ITEMPICKUP")
+  local folder=workspace:FindFirstChild("Remote")
+  local remote=folder and folder:FindFirstChild("ItemHandler")
+  if not pickup or not remote or not remote:IsA("RemoteFunction") then weaponStatus.Text="No se encontro ItemHandler o el pickup de "..name;return end
+  busy=true;weaponStatus.Text="Solicitando "..name.."..."
+  local finished=false
+  local function check()
+   if finished then return end;finished=true;busy=false
    local bag=me:FindFirstChildOfClass("Backpack")
-   local obtained=(bag and bag:FindFirstChild("Remington 870")) or (me.Character and me.Character:FindFirstChild("Remington 870"))
-   note(obtained and "Remington recibida; posicion restaurada." or (ok and "Solicitud enviada; arma aun no confirmada." or "No se pudo pedir el arma; posicion restaurada."))
-  end)
- end)
+   local weapon=(bag and bag:FindFirstChild(name)) or (me.Character and me.Character:FindFirstChild(name))
+   weaponStatus.Text=weapon and (name.." en tu inventario. Tu posicion no cambio.") or "El servidor no entrego el arma. Tu posicion no cambio."
+  end
+  task.delay(4,check)
+  task.spawn(function()pcall(function()remote:InvokeServer(pickup)end);task.wait(.5);if alive then check() end end)
+ end
+ for i,name in ipairs({"M9","Remington 870","AK-47"}) do
+  button(gunGroup,"Conseguir "..name,9,18+(i-1)*43,508,31,function()requestGun(name)end)
+ end
 end
-
 -- Local controllable proxy. The server still sees the original character at the target.
 do
  local sourceCharacter=nil
@@ -838,7 +829,7 @@ local hitConnected=false
 on(R.Heartbeat,function()
  local tool=me.Character and me.Character:FindFirstChildOfClass("Tool")
  local ready=RS:GetAttribute("CombatWeaponProtocol")==2 and tool and tool:GetAttribute("CombatWeaponClientReady")
- integrationStatus.Text=ready and "Arma conectada. Modificadores: Studio / propietario privado." or ((RS:FindFirstChild("GunRemotes") and tool and tool:GetAttribute("ToolType")=="Gun") and prisonStatus or gunAdapterStatus)
+ integrationStatus.Text=ready and "Arma conectada. Modificadores: Studio / propietario privado." or ((rageConfig:GetAttribute("Enabled") and tool) and prisonStatus or gunAdapterStatus)
  local event=RS:FindFirstChild("CombatConfirmedHit")
  if not hitConnected and event and event:IsA("RemoteEvent") then
   hitConnected=true
@@ -883,7 +874,7 @@ activeLabel.TextYAlignment=Enum.TextYAlignment.Top
 activeLabel.TextTruncate=Enum.TextTruncate.None
 local watermark=rect(gui,8,8,365,23,"Background")
 outline(watermark);rect(watermark,0,0,365,1,"Accent")
-local watermarkText=label(watermark,"Combat UI | PRISON-6",6,3,353,18,11)
+local watermarkText=label(watermark,"Combat UI | PRISON-7",6,3,353,18,11)
 
 local function activeRows()
 	local rows={}
@@ -1157,7 +1148,7 @@ R:BindToRenderStep("SimpleCombatHUD",Enum.RenderPriority.Last.Value,function(dt)
 	hudClock=hudClock+dt;fpsClock=fpsClock+dt;frames=frames+1
 	if hudClock>=.1 then refreshHUD();hudClock=0 end
 	if fpsClock>=.5 then
-		watermarkText.Text=string.format("Combat UI | PRISON-6 | %s | %d fps",me.Name,math.round(frames/fpsClock))
+		watermarkText.Text=string.format("Combat UI | PRISON-7 | %s | %d fps",me.Name,math.round(frames/fpsClock))
 		fpsClock,frames=0,0
 	end
 end)
@@ -1781,6 +1772,9 @@ end
 -- Prison Life attribute/GunRemotes adapter, based on the supplied Hybrid script.
 do
  local RS=game:GetService("ReplicatedStorage")
+ local gunModules={}
+ local moduleLoading={}
+ local nextReload=0
  local originals=setmetatable({},{__mode="k"})
  local currentTool,currentPlayer,currentPart=nil,nil,nil
  local acquiredAt,nextShot,nextScan=0,0,0
@@ -1934,11 +1928,19 @@ do
   local tool=me.Character and me.Character:FindFirstChildOfClass("Tool")
   local remotes=RS:FindFirstChild("GunRemotes")
   local shoot=remotes and remotes:FindFirstChild("ShootEvent")
-  local compatible=tool and tool:GetAttribute("ToolType")=="Gun" and shoot and shoot:IsA("RemoteEvent")
+  local module=tool and tool:FindFirstChild("GunStates")
+  if module and module:IsA("ModuleScript") and not moduleLoading[module] then
+   moduleLoading[module]=true
+   task.spawn(function()local ok,value=pcall(require,module);if ok and type(value)=="table" then gunModules[module]=value end end)
+  end
+  local states=module and gunModules[module]
+  local modern=shoot and shoot:IsA("RemoteEvent") and tool and (tool:GetAttribute("ToolType")=="Gun" or type(tool:GetAttribute("FireRate"))=="number")
+  if not modern then shoot=RS:FindFirstChild("ShootEvent") end
+  local compatible=tool and shoot and shoot:IsA("RemoteEvent") and (modern or states)
   if not compatible or not active() then
    for weapon,record in pairs(originals) do if weapon.Parent then restore(weapon,record) end end
    currentTool,currentPlayer,currentPart=nil,nil,nil
-   prisonStatus=compatible and "Prison Life: detectado / pausado" or "Prison Life: equipa arma ToolType=Gun + GunRemotes"
+   prisonStatus=compatible and "Prison Life: detectado / pausado" or "Sin arma/remoto compatible: equipa el arma y espera al modulo"
    return
   end
   if tool~=currentTool then
@@ -1954,31 +1956,56 @@ do
   if not p and retained and not rageConfig:GetAttribute("AutoSwitch") and rageConfig:GetAttribute("Selection")~="Manual" then
    currentPlayer=retained
   end
-  prisonStatus="Prison Life: atributos + ShootEvent detectados"
+  prisonStatus=modern and "Ruta: GunRemotes / atributos" or "Ruta: ShootEvent / GunStates"
   if rageConfig:GetAttribute("SilentAim") then
    if os.clock()>=nextScan then nextScan=os.clock()+5;task.spawn(installHook) end
    prisonStatus=hookState
    if (rageConfig:GetAttribute("HitChance") or 0)>0 then prisonStatus="Silent pausado: Hit Chance no estimable; usa 0" end
   end
-  if not limb or os.clock()-acquiredAt<(rageConfig:GetAttribute("ReactionTime") or 0) then return end
+  if not limb then prisonStatus="Sin objetivo elegible: revisa seleccion, equipo y visibilidad";return end
+  if os.clock()-acquiredAt<(rageConfig:GetAttribute("ReactionTime") or 0) then prisonStatus="Esperando tiempo de reaccion";return end
   local point=limb.Position
   if rageConfig:GetAttribute("Prediction") then point+=limb.AssemblyLinearVelocity*(rageConfig:GetAttribute("PredictionTime") or 0) end
   if not observing and not rageGhost and rageConfig:GetAttribute("Aimbot") and not rageConfig:GetAttribute("SilentAim") then
    if (point-camera.CFrame.Position).Magnitude>.001 then camera.CFrame=CFrame.lookAt(camera.CFrame.Position,point) end
   end
-  if not rageConfig:GetAttribute("AutoShoot") or os.clock()<nextShot then return end
-  local ammo=tool:GetAttribute("Local_CurrentAmmo") or tool:GetAttribute("CurrentAmmo")
-  if type(ammo)~="number" or ammo<=0 then prisonStatus="Prison Life: sin municion o atributo desconocido";return end
+  if not rageConfig:GetAttribute("AutoShoot") then prisonStatus=prisonStatus.." / Auto Shoot OFF";return end
+  if os.clock()<nextShot then return end
+  local ammo=modern and (tool:GetAttribute("Local_CurrentAmmo") or tool:GetAttribute("CurrentAmmo")) or (states and states.CurrentAmmo)
+  if type(ammo)~="number" then prisonStatus="Municion desconocida; no se envio disparo";return end
+  if ammo<=0 then
+   prisonStatus="Sin municion: solicitando recarga"
+   if os.clock()>=nextReload then
+    nextReload=os.clock()+3
+    local reloadRemote=modern and remotes:FindFirstChild("FuncReload") or RS:FindFirstChild("ReloadEvent")
+    if reloadRemote and reloadRemote:IsA("RemoteFunction") then task.spawn(function()pcall(function()reloadRemote:InvokeServer()end)end)
+    elseif reloadRemote and reloadRemote:IsA("RemoteEvent") then reloadRemote:FireServer(tool)
+    else prisonStatus="Sin municion: recarga con R (remoto no encontrado)" end
+   end
+   return
+  end
   if (rageConfig:GetAttribute("HitChance") or 0)>0 then
    prisonStatus="Hit Chance: estimacion no disponible para esta arma; usa 0";return
   end
   local head=part(me.Character,"Head");if not head then return end
-  local bullets=math.clamp(math.floor(tonumber(tool:GetAttribute("ProjectileCount")) or 1),1,20)
+  local count=modern and tool:GetAttribute("ProjectileCount") or (states and states.Bullets)
+  local bullets=math.clamp(math.floor(tonumber(count) or 1),1,20)
+  local rate=modern and tool:GetAttribute("FireRate") or (states and states.FireRate)
+  nextShot=os.clock()+math.max(.01,tonumber(rate) or .12)
   local payload={}
-  for i=1,bullets do payload[i]={head.Position,point,limb} end
-  nextShot=os.clock()+math.max(.05,tonumber(tool:GetAttribute("FireRate")) or .12)
-  local ok=pcall(function()shoot:FireServer(payload)end)
-  if ok then tool:SetAttribute("Local_CurrentAmmo",math.max(0,ammo-1)) else prisonStatus="ShootEvent rechazo la llamada local" end
+  for i=1,bullets do
+   if modern then payload[i]={head.Position,point,limb}
+   else
+    local offset=point-head.Position
+    payload[i]={RayObject=Ray.new(head.Position,offset),Distance=offset.Magnitude,
+     Cframe=CFrame.lookAt(head.Position,point),Hit=limb,Damage=states.Damage or 11}
+   end
+  end
+  local ok,err=pcall(function()
+   if modern then shoot:FireServer(payload) else shoot:FireServer(payload,tool) end
+  end)
+  prisonStatus=ok and string.format("Solicitud enviada a %s / %.3fs (daño no confirmado)",p.Name,math.max(.01,tonumber(rate) or .12)) or "Fallo al enviar: "..tostring(err)
+
  end)
  on(gui.Destroying,function()
   running=false;currentPart=nil;currentPlayer=nil
