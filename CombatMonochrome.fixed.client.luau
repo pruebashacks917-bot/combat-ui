@@ -1155,6 +1155,22 @@ local function pickClosest(camera,center,intentSwitch)
 		local hit=workspace:Raycast(origin,position-origin,params)
 		return not hit or hit.Instance:IsDescendantOf(model)
 	end
+	-- Latch one character for this activation. Cursor movement and FOV edges
+	-- cannot silently replace it with another player.
+	if stickyTarget then
+		if not enemy(stickyTarget) then
+			stickyTarget=nil;randomModel=nil;randomPart=nil
+			return nil,nil,nil
+		end
+		local selected=aimPart(stickyTarget.Character)
+		if selected then
+			local screen=camera:WorldToViewportPoint(selected.Position)
+			if screen.Z>0 and clearAt(stickyTarget.Character,selected.Position) then
+				return stickyTarget,selected,0
+			end
+		end
+		return stickyTarget,nil,nil
+	end
 	local ray=camera:ViewportPointToRay(center.X,center.Y)
 	local hit=workspace:Raycast(ray.Origin,ray.Direction*10000,params)
 	local direct
@@ -1234,7 +1250,10 @@ local function aimAlpha(smooth,instant,manual,dt)
 end
 
 -- Mouse output never writes Camera.CFrame.
+local mouseFeedback=nil
+local mouseFault=nil
 local function applyMouseAim(camera,point,alpha)
+	if mouseFault then return mouseFault end
 	if U.MouseBehavior~=Enum.MouseBehavior.Default
 		or U:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
 		or U:IsMouseButtonPressed(Enum.UserInputType.MouseButton3) then
@@ -1245,13 +1264,34 @@ local function applyMouseAim(camera,point,alpha)
 	end
 	local screen,onScreen=camera:WorldToViewportPoint(point.Position)
 	if not onScreen or screen.Z<=0 then return nil end
-	local delta=(Vector2.new(screen.X,screen.Y)-U:GetMouseLocation())*alpha
+	local cursor=U:GetMouseLocation()
+	local errorVector=Vector2.new(screen.X,screen.Y)-cursor
+	if mouseFeedback and mouseFeedback.Point==point then
+		local actual=cursor-mouseFeedback.Cursor
+		local requested=mouseFeedback.Requested
+		local blocked=requested.Magnitude>=2 and actual.Magnitude<.25
+		local diverging=errorVector.Magnitude>mouseFeedback.Error+6
+		local reversed=actual.Magnitude>1 and actual:Dot(requested)<0
+		local failures=(blocked or diverging or reversed) and mouseFeedback.Failures+1 or 0
+		if failures>=3 then
+			mouseFault="Mouse sin respuesta estable. Suelta el boton; el juego puede controlar la mira."
+			injectedMotion=Vector2.zero
+			return mouseFault
+		end
+		mouseFeedback.Failures=failures
+	end
+	-- Relative input can be amplified by the host. Damped, bounded corrections
+	-- avoid alternating full-distance overshoots; no saved cursor is restored.
+	local delta=errorVector*math.min(alpha,.35)
+	if delta.Magnitude>24 then delta=delta.Unit*24 end
 	local dx,dy=math.round(delta.X),math.round(delta.Y)
 	if dx==0 and dy==0 then return nil end
 	injectedMotion=Vector2.new(dx,dy)
 	injectionExpires=os.clock()+.08
 	local ok=pcall(mousemoverel,dx,dy)
 	if not ok then injectedMotion=Vector2.zero; return "El entorno rechazo el movimiento del mouse." end
+	mouseFeedback={Point=point,Cursor=cursor,Requested=Vector2.new(dx,dy),
+		Error=errorVector.Magnitude,Failures=mouseFeedback and mouseFeedback.Point==point and mouseFeedback.Failures or 0}
 	return nil
 end
 
@@ -1259,6 +1299,9 @@ end
 R:BindToRenderStep("SimpleCombatAim",Enum.RenderPriority.Camera.Value+1,function(dt)
 	local camera=workspace.CurrentCamera
 	if not alive or not camera then return end
+	if not S.Enabled or not (S.Aim or S.Mode) or S.Center~="Cursor" then
+		mouseFeedback=nil;mouseFault=nil
+	end
 	scale.Scale=math.max(.3,math.min(1,
 		(camera.ViewportSize.Y-70)/620,(camera.ViewportSize.X-40)/560))
 	if not UI.Placed then
