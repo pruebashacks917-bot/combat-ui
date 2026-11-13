@@ -302,7 +302,7 @@ local function applyTheme()
 	panel.BackgroundTransparency=UI.MenuAlpha
 end
 
-for i,name in ipairs({"Aimbot","ESP","Settings"}) do
+for i,name in ipairs({"Aimbot","ESP","Rage Bot","Settings"}) do
 	local page=new("ScrollingFrame",{Name=name,Position=UDim2.fromOffset(9,62),
 		Size=UDim2.fromOffset(542,510),BackgroundTransparency=1,BorderSizePixel=0,
 		ScrollBarThickness=3,CanvasSize=UDim2.fromOffset(0,name=="Settings" and 824 or 510),
@@ -420,6 +420,46 @@ end
 number(themeGroup,"Menu transparency",9,214,239,function()return UI.MenuAlpha end,
 	function(v)UI.MenuAlpha=v;applyTheme()end,0,.65)
 
+-- Private weapon integration: attributes are consumed by CombatWeapon.client.luau.
+local rageConfig=new("Folder",{Name="RageSettings"},gui)
+local rageDefaults={Enabled=false,Aimbot=true,SilentAim=false,AutoShoot=false,AutoWall=false,
+ Wallbang=false,Prediction=false,PredictionTime=0,NoRecoil=true,NoSpread=false,HitChance=0,
+ FOV=200,Selection="Crosshair",Hitbox="Head",VisibilityCheck=true,AutoSwitch=true,
+ RapidFire=false,Aim360=false,TeamCheck=true}
+for key,value in pairs(rageDefaults) do rageConfig:SetAttribute(key,value) end
+local rageLeft=group(pages["Rage Bot"],"Private weapon",4,13,258,350)
+local rageRight=group(pages["Rage Bot"],"Targeting",276,13,258,475)
+local rageFlags={{"Enabled","Rage Bot enabled"},{"Aimbot","Aimbot"},{"SilentAim","Silent Aim"},
+ {"AutoShoot","Auto Shoot"},{"AutoWall","Auto Wall"},{"Wallbang","Wallbang"},
+ {"Prediction","Target Prediction"},{"NoRecoil","No Recoil (weapon has none)"},
+ {"NoSpread","No Spread"},{"VisibilityCheck","Visibility Check"},
+ {"AutoSwitch","Auto Switch Target"},{"RapidFire","Rapid Fire"},{"Aim360","360 Aim"},{"TeamCheck","Team Check"}}
+for i,entry in ipairs(rageFlags) do
+ local key,text=entry[1],entry[2]
+ check(rageLeft,text,8,12+(i-1)*23,240,function()return rageConfig:GetAttribute(key)end,
+  function(value)
+   rageConfig:SetAttribute(key,value)
+   if key=="Enabled" and value then S.Aim=false;heldAim=false;target=nil;stickyTarget=nil;if stopBot then stopBot() end end
+  end)
+end
+number(rageRight,"FOV (px)",9,15,239,function()return rageConfig:GetAttribute("FOV")end,
+ function(v)rageConfig:SetAttribute("FOV",v)end,20,600)
+number(rageRight,"Hit Chance (%)",9,60,239,function()return rageConfig:GetAttribute("HitChance")end,
+ function(v)rageConfig:SetAttribute("HitChance",v)end,0,100)
+cycle(rageRight,"Target Selection",9,105,239,{"Crosshair","Distance","Health"},
+ function()return rageConfig:GetAttribute("Selection")end,function(v)rageConfig:SetAttribute("Selection",v)end)
+cycle(rageRight,"Hitbox Selection",9,155,239,aimParts,
+ function()return rageConfig:GetAttribute("Hitbox")end,function(v)rageConfig:SetAttribute("Hitbox",v)end)
+number(rageRight,"Prediction time (s)",9,210,239,function()return rageConfig:GetAttribute("PredictionTime")end,
+ function(v)rageConfig:SetAttribute("PredictionTime",v)end,0,.25)
+label(rageRight,"Requires the supplied weapon kit.",9,263,239,20,11,"Muted")
+label(rageRight,"Walls: Penetrable attribute only.",9,290,239,20,11,"Muted")
+label(rageRight,"Hit Chance: 48-ray estimate.",9,317,239,20,11,"Muted")
+label(rageRight,"Prediction: 0 for this hitscan gun.",9,344,239,20,11,"Muted")
+label(rageRight,"No recoil exists in this weapon.",9,371,239,20,11,"Muted")
+label(rageRight,"Server limits remain enforced.",9,398,239,20,11,"Muted")
+label(rageRight,"Escape / STOP ALL disables Rage.",9,425,239,20,11,"Muted")
+
 local configGroup=group(pages.Settings,"Configuration",276,13,258,230)
 label(configGroup,"Config name",9,12,239,17)
 local configName=input(configGroup,"default",9,33,239,20)
@@ -456,6 +496,7 @@ local watermarkText=label(watermark,"Combat UI | v4.1",6,3,353,18,11)
 
 local function activeRows()
 	local rows={}
+	if rageConfig:GetAttribute("Enabled") then table.insert(rows,"[-] Rage Bot") end
 	if S.Enabled then
 		if S.Aim or S.Mode then
 			table.insert(rows,"["..S.Key.Name.."] "..(S.Center=="Cursor" and "mouse" or "camera").." aimbot ("..S.Activation..")")
@@ -876,6 +917,7 @@ stopBot=function()
 	refresh()
 end
 stopAll=function()
+	rageConfig:SetAttribute("Enabled",false)
 	S.Enabled,target,stickyTarget=false,nil,nil
 	stopBot()
 	note("Detenido.")
@@ -1322,7 +1364,7 @@ R:BindToRenderStep("SimpleCombatAim",Enum.RenderPriority.Camera.Value+1,function
 	circle.Visible=S.Enabled
 	local selected=nil
 	target=nil
-	if S.Enabled and (S.Aim or S.Mode~=nil) and body(me.Character)
+	if not rageConfig:GetAttribute("Enabled") and S.Enabled and (S.Aim or S.Mode~=nil) and body(me.Character)
 		and not binding and not menuBinding and not dragInput and not GuiService.MenuIsOpen and not U:GetFocusedTextBox() then
 		target,selected=pickClosest(camera,center,intentSwitch)
 	else stickyTarget=nil; mouseIntent=Vector2.zero
