@@ -21,6 +21,7 @@ local binding=false
 local stickyTarget=nil
 local frameMotion,mouseIntent=Vector2.zero,Vector2.zero
 local injectedMotion,injectionExpires=Vector2.zero,0
+local manualUntil=0
 local alive, version, target, botTarget = true, 0, nil, nil
 local controls, driving, refresh = nil, false, nil
 local links, message, messageUntil = {}, "", 0
@@ -817,7 +818,7 @@ R:BindToRenderStep("SimpleCombatESP",Enum.RenderPriority.Camera.Value+2,function
 					local endpoint=project(camera,root.Position)
 					if endpoint then
 						drawLine(record.Lines[#bonePairs+1],
-							Vector2.new(camera.ViewportSize.X*.5,camera.ViewportSize.Y-16),
+							Vector2.new(camera.ViewportSize.X*.5,16),
 							endpoint,S.Colors.Tracer)
 					end
 				end
@@ -1175,11 +1176,10 @@ end
 
 
 local function aimAlpha(smooth,instant,manual,dt)
-	local seconds=smooth/100*.45
-	local alpha=(instant or seconds==0) and 1 or 1-math.exp(-dt/seconds)
-	-- Keep assisting during mouse movement, while allowing intentional steering.
-	if manual then alpha=math.min(alpha,1-math.exp(-dt*4)) end
-	return alpha
+	-- User input always takes priority, including with Sticky or Direct aim.
+	if manual then return 1-math.exp(-dt*.6) end
+	local seconds=.08+smooth/100*.45
+	return 1-math.exp(-dt/(instant and .06 or seconds))
 end
 
 -- Mouse output never writes Camera.CFrame.
@@ -1218,8 +1218,9 @@ R:BindToRenderStep("SimpleCombatAim",Enum.RenderPriority.Camera.Value+1,function
     local currentMotion=frameMotion
 	frameMotion=Vector2.zero
 	mouseIntent=mouseIntent*math.exp(-dt/0.08)+currentMotion
-	local manualMove=not S.Sticky and mouseIntent.Magnitude>=100
-	local intentSwitch=manualMove
+	if currentMotion.Magnitude>.5 then manualUntil=os.clock()+.12 end
+	local manualMove=os.clock()<manualUntil
+	local intentSwitch=not S.Sticky and mouseIntent.Magnitude>=28
 	if intentSwitch then mouseIntent=Vector2.zero end
 	local center=S.Center=="Cursor" and U:GetMouseLocation() or camera.ViewportSize*.5
 	circle.Position=UDim2.fromOffset(center.X,center.Y)
@@ -1234,7 +1235,7 @@ R:BindToRenderStep("SimpleCombatAim",Enum.RenderPriority.Camera.Value+1,function
 	end
 	 local aimIssue=nil
 	if selected and (selected.Position-camera.CFrame.Position).Magnitude>.01 then
-		local alpha=manualMove and aimAlpha(S.Smooth,S.Lock,true,dt) or 1
+		local alpha=aimAlpha(S.Smooth,S.Lock,manualMove,dt)
 		if S.Center=="Cursor" then
 			aimIssue=applyMouseAim(camera,selected,alpha)
 		else
