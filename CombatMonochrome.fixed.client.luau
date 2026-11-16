@@ -504,36 +504,23 @@ on(R.Heartbeat,function()
 end)
 on(gui.Destroying,endObserve)
 do
-local gunGroup=group(pages.Armas,"Armas",4,13,530,205)
-local weaponStatus=label(gunGroup,"Elige un destino.",9,154,508,25,12,"Muted")
-local origin,owner,trip
-local move
-move=function(position,name)
- local character=me.Character
- local hum=character and character:FindFirstChildOfClass("Humanoid")
- if not hum or hum.Health<=0 or not character:FindFirstChild("HumanoidRootPart") then
-  weaponStatus.Text="Necesitas un personaje vivo.";return
+local gunGroup=group(pages.Armas,"Armas",4,13,530,160)
+local weaponStatus=label(gunGroup,"Elige un arma.",9,109,508,25,12,"Muted")
+local busy=false
+local function requestWeapon(name)
+ if busy then return end
+ local remote=game:GetService("ReplicatedStorage"):FindFirstChild("AdminPanelGiveWeapon")
+ if not remote or not remote:IsA("RemoteFunction") then
+  weaponStatus.Text="Falta instalar el script de entrega en el servidor.";return
  end
- if position then
-  if not origin or owner~=character then origin=character:GetPivot();owner=character end
-  local token={};trip=token
-  character:PivotTo(CFrame.new(position)*origin.Rotation)
-  weaponStatus.Text=name.." - regreso en 1 segundo."
-  task.delay(1,function()
-   if trip==token and owner==me.Character then move() end
-  end)
- elseif owner==character and origin then
-  character:PivotTo(origin);origin=nil;owner=nil;trip=nil
-  weaponStatus.Text="Posicion restaurada."
- else
-  weaponStatus.Text="Primero elige un destino."
- end
+ busy=true;weaponStatus.Text="Pidiendo "..name.."..."
+ local ok,result=pcall(function()return remote:InvokeServer(name)end)
+ busy=false
+ if weaponStatus.Parent then weaponStatus.Text=ok and tostring(result) or "Error al pedir el arma." end
 end
-button(gunGroup,"M4A1",9,18,508,31,function()move(Vector3.new(847,101,2229),"M4A1")end)
-button(gunGroup,"Remington 870",9,61,508,31,function()move(Vector3.new(820,101,2229),"Remington 870")end)
-button(gunGroup,"Volver",9,104,508,31,function()move()end)
-
-on(gui.Destroying,function() if trip and owner==me.Character and owner.Parent then owner:PivotTo(origin) end;trip=nil end)
+for i,name in ipairs({"M4A1","Remington 870"}) do
+ button(gunGroup,name,9,18+(i-1)*43,508,31,function()requestWeapon(name)end)
+end
 end
 local positionGroup=group(pages.Jugador,"Posicion",4,13,530,100)
 local positionLabel=label(positionGroup,"",9,20,508,25,12)
