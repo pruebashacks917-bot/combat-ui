@@ -32,7 +32,7 @@ local function rect(parent,x,y,w,h,role)
 	return theme(new("Frame",{Position=UDim2.fromOffset(x,y),Size=UDim2.fromOffset(w,h),
 		BorderSizePixel=0},parent),"BackgroundColor3",role or "Main")
 end
-local panel=rect(gui,20,80,560,350,"Main")
+local panel=rect(gui,20,80,560,620,"Main")
 panel.AnchorPoint=Vector2.new(0,.5)
 panel.Position=UDim2.new(0,24,.5,0)
 outline(panel)
@@ -173,13 +173,83 @@ local function applyTheme()
 	panel.BackgroundTransparency=UI.MenuAlpha
 end
 local pages={}
-for i,name in ipairs({"Armas","Settings"}) do
- local page=rect(panel,9,62,542,280,"Main")
- pages[name]=page;page.Visible=name=="Armas"
+for i,name in ipairs({"Aimbot","Armas","Settings"}) do
+ local page=rect(panel,9,62,542,510,"Main")
+ pages[name]=page;page.Visible=name=="Aimbot"
  button(panel,name,9+(i-1)*88,35,83,21,function()
   for key,item in pairs(pages) do item.Visible=key==name end
  end)
 end
+local function check(parent,titleText,x,y,w,get,set)
+	local b=new("TextButton",{Text="",Position=UDim2.fromOffset(x,y),Size=UDim2.fromOffset(w,21),
+		BackgroundTransparency=1,AutoButtonColor=false},parent)
+	local square=rect(b,2,6,9,9,"Background"); outline(square)
+	local text=label(b,titleText,17,0,w-17,21,12)
+	table.insert(widgetUpdates,function()
+		square.BackgroundColor3=get() and UI.Theme.Accent or UI.Theme.Background
+	end)
+	on(b.Activated,function() set(not get()); refresh() end)
+	return b
+end
+local tags=game:GetService("CollectionService")
+local players=game:GetService("Players")
+local run=game:GetService("RunService")
+local aim={enabled=true,active=false,sticky=true,direct=false,part="Head",radius=160,smooth=45}
+local locked=nil
+local function flag(parent,text,key,y)
+ check(parent,text,8,y,240,function()return aim[key]end,function(value)
+  aim[key]=value;locked=nil
+ end)
+end
+local a=group(pages.Aimbot,"Aimbot",4,13,258,226)
+flag(a,"Master enabled","enabled",12)
+flag(a,"Enabled","active",35)
+flag(a,"Direct aim","direct",58)
+flag(a,"Sticky target","sticky",81)
+label(a,"Activation key",9,110,100,20)
+label(a,"[Q]",139,110,109,20)
+cycle(a,"Target part",9,161,239,{"Head","HumanoidRootPart"},function()return aim.part end,
+ function(value)aim.part=value;locked=nil end)
+local c=group(pages.Aimbot,"Targeting",4,257,258,146)
+number(c,"FOV radius (px)",9,15,239,function()return aim.radius end,function(v)aim.radius=v end,20,600)
+number(c,"Smoothness",9,58,239,function()return aim.smooth end,function(v)aim.smooth=v end,0,100)
+local d=group(pages.Aimbot,"Information",276,191,258,126)
+label(d,"NPC tag: AimTarget",9,13,239,18,11,"Muted")
+local aimStatus=label(d,"Apuntado desactivado",9,34,239,18,11,"Muted")
+local function candidate(model,cam)
+ if not model:IsA("Model") or not model:IsDescendantOf(workspace) or players:GetPlayerFromCharacter(model) then return end
+ local part=model:FindFirstChild(aim.part)
+ local hum=model:FindFirstChildOfClass("Humanoid")
+ if not part or not part:IsA("BasePart") or (hum and hum.Health<=0) then return end
+ local point,visible=cam:WorldToViewportPoint(part.Position)
+ if not visible then return end
+ local distance=(Vector2.new(point.X,point.Y)-cam.ViewportSize/2).Magnitude
+ if distance<=aim.radius then return part,distance end
+end
+local renderKey="AimTarget_"..game:GetService("HttpService"):GenerateGUID(false)
+run:BindToRenderStep(renderKey,Enum.RenderPriority.Camera.Value+1,function(dt)
+ local cam=workspace.CurrentCamera
+ if not aim.enabled or not aim.active or not cam then
+  locked=nil;aimStatus.Text="Apuntado desactivado";return
+ end
+ local part
+ if aim.sticky and locked and tags:HasTag(locked,"AimTarget") then part=candidate(locked,cam) end
+ if not part then
+  locked=nil
+  local best=math.huge
+  for _,model in ipairs(tags:GetTagged("AimTarget")) do
+   local target,distance=candidate(model,cam)
+   if target and distance<best then locked=model;part=target;best=distance end
+  end
+ end
+ aimStatus.Text=locked and locked.Name or "Buscando objetivo..."
+ if part and (part.Position-cam.CFrame.Position).Magnitude>.01 then
+  local direction=CFrame.lookAt(cam.CFrame.Position,part.Position)
+  local alpha=1
+  if not aim.direct and aim.smooth>0 then alpha=1-math.exp(-dt*600/aim.smooth) end
+  cam.CFrame=cam.CFrame:Lerp(direction,alpha)
+ end
+end)
 local gunGroup=group(pages.Armas,"Armas",4,13,530,205)
 local weaponStatus=label(gunGroup,"Elige un destino.",9,154,508,25,12,"Muted")
 local origin,owner,trip
@@ -250,9 +320,11 @@ local keyConnection=on(game:GetService("UserInputService").InputBegan,function(k
  if processed then return end
  if binding and key.UserInputType==Enum.UserInputType.Keyboard then
   menuKey=key.KeyCode;binding=false;keyButton.Text="["..menuKey.Name.."]"
- elseif key.KeyCode==menuKey then toggle() end
+ elseif key.KeyCode==menuKey then toggle()
+ elseif key.KeyCode==Enum.KeyCode.Q then aim.active=not aim.active;locked=nil;refresh() end
 end)
 on(gui.Destroying,function()
+ run:UnbindFromRenderStep(renderKey)
  keyConnection:Disconnect()
  if trip and owner==me.Character and owner.Parent then owner:PivotTo(origin) end
  trip=nil
