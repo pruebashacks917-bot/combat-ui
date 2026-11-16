@@ -194,8 +194,8 @@ move=function(position,name)
   if not origin or owner~=character then origin=character:GetPivot();owner=character end
   local token={};trip=token
   character:PivotTo(CFrame.new(position)*origin.Rotation)
-  weaponStatus.Text=name.." - regreso en 2 segundos."
-  task.delay(2,function()
+  weaponStatus.Text=name.." - regreso en 1 segundo."
+  task.delay(1,function()
    if trip==token and owner==me.Character then move() end
   end)
  elseif owner==character and origin then
